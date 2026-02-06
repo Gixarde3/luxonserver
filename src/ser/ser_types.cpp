@@ -3,6 +3,8 @@
 
 #include "ser_types.hpp"
 
+#include <bit>
+
 namespace luxon::ser {
 namespace {
 inline std::size_t hash_combine(std::size_t a, std::size_t b) noexcept {
