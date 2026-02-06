@@ -7,6 +7,8 @@ project(Luxon)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+include(cmake/CPM.cmake)
+
 # Add compile options for better error messages and warnings
 if(MSVC)
     add_compile_options(/W4)
@@ -63,7 +65,7 @@ else()
 
     find_package(MbedTLS 3)
     if (NOT MbedTLS_FOUND)
-        add_subdirectory(mbedtls)
+        CPMAddPackage("gh:Mbed-TLS/mbedtls#mbedtls-3.6.5")
     endif()
 endif()
 

@@ -1,6 +1,3 @@
-[submodule "mbedtls"]
-	path = mbedtls
-	url = https://github.com/Mbed-TLS/mbedtls.git
 [submodule "libtomcrypt"]
 	path = libtomcrypt
 	url = https://github.com/libtom/libtomcrypt.git
