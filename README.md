@@ -25,7 +25,7 @@ This is where Photon ENet protocol is implemented:
 
 This is where Photon's binary serialization is implemented:
 
-* **Protocol Support**: Full implementation of **GP Binary V16** and **GP Binary V18**.
+* **Protocol Support**: Implementation of **GP Binary V16** and **GP Binary V18**.
 * **Type System**: Supports primitives (u8, i16, i64, f32, etc.), arrays, hashmaps, dictionaries, and custom types.
 * **Encryption**:
   * **Diffie-Hellman Key Exchange** (Oakley Group 1, 768-bit).
