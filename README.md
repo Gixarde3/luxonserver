@@ -112,23 +112,3 @@ auto bytes = protocol->Serialize(Message(req));
 // Deserialize
 auto decoded = protocol->Deserialize(*bytes);
 ```
-
-## Protocol Details
-
-### Handshake & Encryption
-
-Luxon implements the specific internal operations required to establish an encrypted session:
-
-1. **InitEncryption (OpCode 0)**: The client generates a DH keypair and sends the public key to the server.
-2. **Derivation**: The server responds with its public key. Both sides derive the shared secret (hashed via SHA-256) to create the AES-256 key.
-3. **Secure Communication**: Subsequent payloads (except Disconnect/Init) can be encrypted by setting the `encrypted` field in the message when serializing it.
-
-### ENet Packet Header
-
-Luxon handles the specific packet header format used by the target protocol:
-
-* **PeerID**: 2 bytes
-* **Flags/Type**: CRC presence, Encryption flags.
-* **Command Count**: Number of commands in the aggregated packet.
-* **Timestamp**: Sent time for RTT calculation.
-* **Challenge**: 4-byte hash for connection verification.
