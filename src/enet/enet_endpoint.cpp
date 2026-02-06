@@ -39,15 +39,25 @@ std::string EnetEndpoint::to_string() const {
 std::size_t EnetEndpointHash::operator()(const EnetEndpoint& ep) const noexcept {
     // Hash raw bytes (good enough for endpoint keying)
     const uint8_t *p = reinterpret_cast<const uint8_t *>(&ep.addr);
-    size_t h;
-    if constexpr (sizeof(size_t) == 4)
+
+    std::size_t h;
+    std::size_t prime;
+
+    if constexpr (sizeof(std::size_t) == 4) {
+        // 32-bit FNV-1a constants
         h = 2166136261u;
-    else
+        prime = 16777619u;
+    } else {
+        // 64-bit FNV-1a constants
         h = 14695981039346656037ull;
+        prime = 1099511628211ull;
+    }
+
     for (size_t i = 0; i < static_cast<size_t>(ep.len); ++i) {
         h ^= p[i];
-        h *= 1099511628211ull;
+        h *= prime;
     }
+
     h ^= ep.len;
     return h;
 }
