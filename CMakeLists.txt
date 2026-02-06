@@ -111,6 +111,10 @@ add_library(luxon_enet
     src/enet/enet_server.cpp
 )
 
+if (MSVC)
+    target_compile_definitions(luxon_enet PRIVATE NOMINMAX)
+endif()
+
 target_link_libraries(luxon_enet PUBLIC
     ${LUXON_PLATFORM_LIBS}
 )
