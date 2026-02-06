@@ -70,6 +70,12 @@ struct EnetEndpointHash {
     std::size_t operator()(const EnetEndpoint& ep) const noexcept;
 };
 
+#ifdef _WIN32
+using SocketType = SOCKET;
+#else
+using SocketType = int;
+#endif
+
 // Low-level UDP socket wrapper (blocking recv in poll loop)
 class UdpSocket {
 public:
@@ -82,8 +88,14 @@ public:
     bool bind_any(uint16_t port, bool ipv6 = false);
     bool connect_to(const std::string& host, uint16_t port);
 
-    bool is_open() const { return sock_ >= 0; }
-    int native_handle() const { return sock_; }
+    bool is_open() const {
+#ifdef _WIN32
+        return sock_ != INVALID_SOCKET;
+#else
+        return sock_ >= 0;
+#endif
+    }
+    SocketType native_handle() const { return sock_; }
 
     bool send_to(const uint8_t *data, size_t len, const EnetEndpoint& to);
     bool send_connected(const uint8_t *data, size_t len);
