@@ -1,3 +1,6 @@
+// Copyright (c) 2026, the Luxon contributors
+// SPDX-License-Identifier: BSD-3-Clause
+
 #include "ser_gp_binary_v18.hpp"
 
 #include <algorithm>
