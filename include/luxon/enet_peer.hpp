@@ -335,7 +335,7 @@ public:
     std::shared_ptr<EnetPeer> find_peer(int16_t peer_id) const;
 
     // Get native UDP socket
-    int native_handle() const { return sock_.native_handle(); }
+    SocketType native_handle() const { return sock_.native_handle(); }
 
 private:
     EnetPeerConfig cfg_;
