@@ -14,12 +14,24 @@ inline std::size_t hash_combine(std::size_t a, std::size_t b) noexcept {
 }
 
 std::size_t hash_bytes(std::span<const uint8_t> s) noexcept {
-    std::size_t h = 1469598103934665603ULL; // FNV-1a 64-bit basis
-    for (uint8_t b : s) {
-        h ^= b;
-        h *= 1099511628211ULL;
+    if constexpr (sizeof(std::size_t) == 8) {
+        // 64-bit FNV-1a
+        std::size_t h = 1469598103934665603ULL;
+        for (uint8_t b : s) {
+            h ^= b;
+            h *= 1099511628211ULL;
+        }
+        return h;
+    } else {
+        // 32-bit FNV-1a
+        // Basis: 2166136261, Prime: 16777619
+        std::size_t h = 2166136261U;
+        for (uint8_t b : s) {
+            h ^= b;
+            h *= 16777619U;
+        }
+        return h;
     }
-    return h;
 }
 
 inline bool f32_bits_equal(float a, float b) noexcept { return std::bit_cast<uint32_t>(a) == std::bit_cast<uint32_t>(b); }
