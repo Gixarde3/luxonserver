@@ -40,8 +40,8 @@ check_c_source_compiles("
         char host[1025];
         char service[32];
 
-        // We explicitly use the flags here.
-        // If they are missing, compilation fails and HAS_GETNAMEINFO becomes false.
+        // We explicitly use the flags here
+        // If they are missing, compilation fails and HAS_GETNAMEINFO becomes false
         getnameinfo(&sa, sizeof(sa), host, sizeof(host), service, sizeof(service),
                     NI_NUMERICHOST | NI_NUMERICSERV);
 
@@ -60,7 +60,11 @@ if (LUXON_USE_TOMCRYPT)
 else()
     set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
     set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
-    add_subdirectory(mbedtls)
+
+    find_package(MbedTLS 3)
+    if (NOT MbedTLS_FOUND)
+        add_subdirectory(mbedtls)
+    endif()
 endif()
 
 # Platform socket libs
@@ -83,7 +87,7 @@ if (LUXON_USE_TOMCRYPT)
     target_link_libraries(luxon_ser PRIVATE libtomcrypt)
 else()
     target_sources(luxon_ser PRIVATE src/ser/ser_encryption.cpp)
-    target_link_libraries(luxon_ser PRIVATE mbedtls)
+    target_link_libraries(luxon_ser PRIVATE MbedTLS::mbedcrypto)
 endif()
 
 target_precompile_headers(luxon_ser PRIVATE
