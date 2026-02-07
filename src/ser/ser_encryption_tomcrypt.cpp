@@ -8,6 +8,10 @@
 #include <string>
 #include <vector>
 
+#ifdef __3DS__
+#include <3ds.h>
+#endif
+
 extern "C" {
 #include <tomcrypt.h>
 #include <tommath.h>
@@ -200,6 +204,25 @@ std::expected<void, Error> CryptoContext::ensure_rng_ready() {
     }
 
     unsigned char seed[64];
+
+#ifdef __3DS__
+    Result rc = psInit();
+    if (R_FAILED(rc)) {
+        (void)prng_descriptor[impl_->prng_idx].done(&impl_->prng);
+        impl_->rng_error = "psInit failed";
+        return std::unexpected(Error{.code = Error::Code::CryptoError, .message = impl_->rng_error});
+    }
+
+    rc = PS_GenerateRandomBytes(seed, sizeof(seed));
+    psExit();
+
+    if (R_FAILED(rc)) {
+        secure_zero(seed, sizeof(seed));
+        (void)prng_descriptor[impl_->prng_idx].done(&impl_->prng);
+        impl_->rng_error = "PS_GenerateRandomBytes failed";
+        return std::unexpected(Error{.code = Error::Code::CryptoError, .message = impl_->rng_error});
+    }
+#else
     const unsigned long got = rng_get_bytes(seed, sizeof(seed), nullptr);
     if (got != sizeof(seed)) {
         secure_zero(seed, sizeof(seed));
@@ -207,6 +230,7 @@ std::expected<void, Error> CryptoContext::ensure_rng_ready() {
         impl_->rng_error = "rng_get_bytes failed to provide sufficient entropy";
         return std::unexpected(Error{.code = Error::Code::CryptoError, .message = impl_->rng_error});
     }
+#endif
 
     ret = prng_descriptor[impl_->prng_idx].add_entropy(seed, sizeof(seed), &impl_->prng);
     secure_zero(seed, sizeof(seed));
