@@ -83,7 +83,7 @@ add_library(luxon_ser
     include/luxon/ser_interface.hpp src/ser/ser_interface.cpp
     include/luxon/ser_gp_binary_v18.hpp src/ser/ser_gp_binary_v18.cpp
     include/luxon/ser_gp_binary_v16.hpp src/ser/ser_gp_binary_v16.cpp
-    include/luxon/ser_codes.hpp
+    include/luxon/internal_codes.hpp
     include/luxon/common_codes.hpp
 )
 if (LUXON_USE_TOMCRYPT)
