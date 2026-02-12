@@ -121,7 +121,7 @@ struct Value {
         return T{};
     }
 
-    template <typename T> T& get_or(T& default_value) const {
+    template <typename T> const T& get_or(T& default_value) const {
         if (const T *ptr = std::get_if<T>(&value)) {
             return *ptr;
         }
