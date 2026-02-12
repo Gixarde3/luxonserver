@@ -6,7 +6,7 @@ namespace luxon {
 
 // https://gitlab.inf.uni-konstanz.de/sanani.rajabov/vr-classroom-grouping/-/blob/6ec1e00f6c17e8da59fd6f351e55d100a91cb902/Assets/Photon/PhotonLibs/Photon3Unity3D.xml#L851-862
 // Timestamp keys are indeed sent over Websockets in ping iops
-namespace IOpCodes {
+namespace ICodes {
 enum Enum : uint8_t {
     // Internal operation opcodes
     IOpInitEncryption = 0,
@@ -21,5 +21,5 @@ enum Enum : uint8_t {
     // Operation return codes
     RetOk = 0
 };
-} // namespace IOpCodes
+} // namespace ICodes
 } // namespace luxon
