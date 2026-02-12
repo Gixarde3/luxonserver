@@ -61,8 +61,8 @@ struct Value {
                                      ByteArray,                // byte array
                                      std::vector<bool>,        // boolean array
                                      std::vector<int16_t>,     // short array
-                                     std::vector<int32_t>,     // int array (encoded as compressed int32 array)
-                                     std::vector<int64_t>,     // long array (encoded as compressed int64 array)
+                                     std::vector<int32_t>,     // int array
+                                     std::vector<int64_t>,     // long array
                                      std::vector<float>,       // float array
                                      std::vector<double>,      // double array
                                      std::vector<std::string>, // string array
