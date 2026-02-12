@@ -18,6 +18,7 @@
 #include <vector>
 
 namespace luxon::ser {
+
 using ByteArray = std::vector<uint8_t>;
 
 struct RawCustomValue {
@@ -28,6 +29,7 @@ struct RawCustomValue {
 };
 
 struct Value;
+extern const Value null;
 
 struct ValueHash {
     std::size_t operator()(const Value& v) const noexcept;
@@ -37,7 +39,14 @@ using Hashtable = std::unordered_map<Value, Value, ValueHash>;
 using HashtablePtr = std::shared_ptr<Hashtable>;
 
 using ObjectArray = std::vector<Value>;
-using Dictionary = std::unordered_map<uint8_t, Value>;
+
+class Dictionary : public std::unordered_map<uint8_t, Value> {
+public:
+    using std::unordered_map<uint8_t, Value>::unordered_map;
+
+    using std::unordered_map<uint8_t, Value>::operator[];
+    const Value& operator[](uint8_t key) const;
+};
 
 struct Value {
     using VariantType = std::variant<std::monostate,           // null
@@ -195,7 +204,10 @@ struct InitMessage {
 struct InitResponseMessage {
 };
 
-using ParameterList = std::unordered_map<uint8_t, Value>;
+class ParameterList : public Dictionary {
+public:
+    using Dictionary::Dictionary;
+};
 
 struct EventMessage {
     uint8_t event_code{};

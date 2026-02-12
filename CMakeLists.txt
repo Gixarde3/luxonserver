@@ -179,17 +179,17 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
         luxon_ser luxon_visualizer
     )
 
-    add_executable(luxon_test_client
-        apps/luxon_test_client.cpp
-    )
-    target_link_libraries(luxon_test_client
-        luxon_enet luxon_ser
-    )
+    #add_executable(luxon_test_client
+    #    apps/luxon_test_client.cpp
+    #)
+    #target_link_libraries(luxon_test_client
+    #    luxon_enet luxon_ser
+    #)
 
-    add_executable(luxon_test_server
-        apps/luxon_test_server.cpp
-    )
-    target_link_libraries(luxon_test_server
-        luxon_enet luxon_ser luxon_visualizer
-    )
+    #add_executable(luxon_test_server
+    #    apps/luxon_test_server.cpp
+    #)
+    #target_link_libraries(luxon_test_server
+    #    luxon_enet luxon_ser luxon_visualizer
+    #)
 endif()

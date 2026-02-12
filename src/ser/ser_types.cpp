@@ -38,6 +38,8 @@ inline bool f32_bits_equal(float a, float b) noexcept { return std::bit_cast<uin
 inline bool f64_bits_equal(double a, double b) noexcept { return std::bit_cast<uint64_t>(a) == std::bit_cast<uint64_t>(b); }
 } // namespace
 
+const Value null;
+
 bool Value::operator==(const Value& other) const {
     if (value.index() != other.value.index())
         return false;
@@ -168,5 +170,12 @@ std::size_t ValueHash::operator()(const Value& v) const noexcept {
         v.value);
 
     return h;
+}
+
+const Value& Dictionary::operator[](uint8_t key) const {
+    auto res = find(key);
+    if (res == end())
+        return null;
+    return res->second;
 }
 } // namespace luxon::ser
