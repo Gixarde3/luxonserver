@@ -43,8 +43,8 @@ using ObjectArray = std::vector<Value>;
 class Dictionary : public std::unordered_map<uint8_t, Value> {
 public:
     using std::unordered_map<uint8_t, Value>::unordered_map;
-
     using std::unordered_map<uint8_t, Value>::operator[];
+
     const Value& operator[](uint8_t key) const;
 };
 
@@ -204,10 +204,7 @@ struct InitMessage {
 struct InitResponseMessage {
 };
 
-class ParameterList : public Dictionary {
-public:
-    using Dictionary::Dictionary;
-};
+using ParameterList = Dictionary;
 
 struct EventMessage {
     uint8_t event_code{};
