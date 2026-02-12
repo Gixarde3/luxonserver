@@ -354,7 +354,7 @@ static constexpr uint8_t RandomMatching = 2;
 // able to archive at the time)
 namespace LobbyType {
 static constexpr uint8_t Default = 0;
-static constexpr uint8_t SqlLobby = 1;
-static constexpr uint8_t AsyncLobby = 2;
+static constexpr uint8_t SqlLobby = 2;
+static constexpr uint8_t AsyncLobby = 3;
 } // namespace LobbyType
 } // namespace luxon
