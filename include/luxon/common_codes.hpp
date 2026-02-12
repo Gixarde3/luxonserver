@@ -282,7 +282,7 @@ static constexpr int16_t MaxCcuReached = 32757;
 } // namespace Throttling
 } // namespace ErrorCodes
 
-// https://doc-api.photonengine.com/en/pun/current/class_photon_1_1_realtime_1_1_room_options.html (2024-02-04)
+// https://doc-api.photonengine.com/en/pun/current/class_photon_1_1_realtime_1_1_room_options.html (2026-02-04)
 // https://web.archive.org/web/20260204185936/https://doc-api.photonengine.com/en/pun/current/class_photon_1_1_realtime_1_1_room_options.html
 namespace GameProps {
 static constexpr uint8_t MaxPlayers = 255;
@@ -298,7 +298,7 @@ static constexpr uint8_t PlayerTTL = 246;
 static constexpr uint8_t EmptyGameTTL = 245;
 } // namespace GameProps
 
-// https://doc-api.photonengine.com/en/pun/current/class_photon_1_1_realtime_1_1_actor_properties.html (2024-02-04)
+// https://doc-api.photonengine.com/en/pun/current/class_photon_1_1_realtime_1_1_actor_properties.html (2026-02-04)
 // https://web.archive.org/web/20260204190349/https://doc-api.photonengine.com/en/pun/current/class_photon_1_1_realtime_1_1_actor_properties.html
 namespace ActorProps {
 static constexpr uint8_t NickName = 255;
@@ -306,7 +306,7 @@ static constexpr uint8_t IsInactive = 254;
 static constexpr uint8_t UserId = 253;
 } // namespace ActorProps
 
-// https://doc-api.photonengine.com/en/pun/current/class_photon_1_1_realtime_1_1_room_options.html (2024-02-04)
+// https://doc-api.photonengine.com/en/pun/current/class_photon_1_1_realtime_1_1_room_options.html (2026-02-04)
 // https://web.archive.org/web/20260204185936/https://doc-api.photonengine.com/en/pun/current/class_photon_1_1_realtime_1_1_room_options.html
 namespace GameFlags {
 static constexpr uint32_t CheckUserOnJoin = 0x01;
@@ -324,7 +324,7 @@ static constexpr uint8_t All = 1;
 static constexpr uint8_t MasterClient = 2;
 } // namespace ReceiverGroup
 
-// https://doc-api.photonengine.com/en/plugins/current/class_photon_1_1_hive_1_1_plugin_1_1_cache_operations.html (2024-02-04)
+// https://doc-api.photonengine.com/en/plugins/current/class_photon_1_1_hive_1_1_plugin_1_1_cache_operations.html (2026-02-04)
 // https://web.archive.org/web/20260204190053/https://doc-api.photonengine.com/en/plugins/current/class_photon_1_1_hive_1_1_plugin_1_1_cache_operations.html
 namespace CacheOperation {
 static constexpr uint8_t DoNotCache = 0;
@@ -341,11 +341,20 @@ static constexpr uint8_t SlicePurgeIndex = 12;
 static constexpr uint8_t SlicePurgeUpToIndex = 13;
 } // namespace CacheOperation
 
-// https://doc-api.photonengine.com/en/pun/current/namespace_photon_1_1_realtime.html#a0b5a0270c468f91b73474bae9bbca85e (2024-02-04)
+// https://doc-api.photonengine.com/en/pun/current/namespace_photon_1_1_realtime.html#a0b5a0270c468f91b73474bae9bbca85e (2026-02-04)
 // https://web.archive.org/web/20260204190216/https://doc-api.photonengine.com/en/pun/current/namespace_photon_1_1_realtime.html#a0b5a0270c468f91b73474bae9bbca85e
 namespace MatchmakingType {
 static constexpr uint8_t FillRoom = 0;
 static constexpr uint8_t SerialMatching = 1;
 static constexpr uint8_t RandomMatching = 2;
 } // namespace MatchmakingType
+
+// https://doc-api.photonengine.com/en/pun/v1/_loadbalancing_peer_8cs.html#ab34738ecd04700648af88bf53d1d74ad (2026-02-12)
+// http://web.archive.org/web/20250630140825/https://doc-api.photonengine.com/en/pun/v1/_loadbalancing_peer_8cs.html#ab34738ecd04700648af88bf53d1d74ad (wasn't
+// able to archive at the time)
+namespace LobbyType {
+static constexpr uint8_t Default = 0;
+static constexpr uint8_t SqlLobby = 1;
+static constexpr uint8_t AsyncLobby = 2;
+} // namespace LobbyType
 } // namespace luxon
