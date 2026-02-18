@@ -1,3 +1,4 @@
+
 #pragma once
 
 #include <cstdint>
@@ -12,14 +13,24 @@ enum Enum : uint8_t {
     IOpInitEncryption = 0,
     IOpPing = 1,
 
+    // Luxon-specific internal operation opcodes
+    IOpTransportProtocol = 255,
+
     // Internal operation dict keys
     IKeyClientKey = 1,
     IKeyServerKey = 1,
     IKeyClientTimestamp = 1,
     IKeyServerTimestamp = 2,
 
+    // Luxon-specific internal operation dict keys
+    IKeyTransportProtocol = 1,
+
     // Operation return codes
     RetOk = 0
 };
 } // namespace ICodes
+
+namespace ITransportProtocol {
+enum Enum : uint8_t { UDP, TCP, WebSocket };
+}
 } // namespace luxon
