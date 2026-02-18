@@ -19,13 +19,16 @@ endif()
 # Functionality checks
 include(CheckSymbolExists)
 include(CheckCSourceCompiles)
+include(CheckIncludeFile)
 
 if (WIN32)
     set(CMAKE_REQUIRED_LIBRARIES ws2_32)
     check_symbol_exists(inet_pton "winsock2.h;ws2tcpip.h" HAS_PTON)
+else()
+    check_symbol_exists(inet_pton "sys/types.h;sys/socket.h;netinet/in.h;arpa/inet.h" HAS_PTON)
 endif()
 
-check_symbol_exists(inet_pton "sys/types.h;sys/socket.h;netinet/in.h;arpa/inet.h" HAS_PTON)
+check_include_file(netdb.h HAS_NETDB)
 
 check_c_source_compiles("
     #ifdef _WIN32
@@ -134,6 +137,10 @@ endif()
 
 if(HAS_GETNAMEINFO)
     target_compile_definitions(luxon_enet PUBLIC LUXON_ENET_HAS_GETNAMEINFO PRIVATE HAS_GETNAMEINFO)
+endif()
+
+if(HAS_NETDB)
+    target_compile_definitions(luxon_enet PUBLIC LUXON_ENET_HAS_NETDB PRIVATE HAS_NETDB)
 endif()
 
 # luxon_http_parser library

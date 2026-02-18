@@ -4,7 +4,7 @@
 #include "enet_peer.hpp"
 
 #include <cstring>
-#ifndef _WIN32
+#ifdef HAS_NETDB
 #include <netdb.h>
 #endif
 

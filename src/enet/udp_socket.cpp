@@ -5,6 +5,9 @@
 
 #include <cstring>
 #ifndef _WIN32
+#include <sys/socket.h>
+#endif
+#ifdef HAS_NETDB
 #include <netdb.h>
 #endif
 
