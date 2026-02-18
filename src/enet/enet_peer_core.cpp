@@ -48,6 +48,22 @@ EnetPeer::EnetPeer(EnetPeerConfig cfg) : cfg_(cfg) {
     sent_reliable_.reserve(100);
 }
 
+bool EnetPeer::use(UdpSocket& sock) {
+    if (state_ != EnetConnectionState::Disconnected)
+        return false;
+
+    sock_ = &sock;
+    remote_.reset();
+
+    state_ = EnetConnectionState::Connecting;
+    if (on_state_changed)
+        on_state_changed(state_);
+
+    send_connect();
+
+    return true;
+}
+
 int EnetPeer::now_ms() const { return create_time_base() - time_base_; }
 
 bool EnetPeer::connect(UdpSocket& sock, const std::string& host, uint16_t port) {
@@ -65,30 +81,8 @@ bool EnetPeer::connect(UdpSocket& sock, const std::string& host, uint16_t port) 
     if (on_state_changed)
         on_state_changed(state_);
 
-    // Send inital connect command
-    EnetOutCommand oc;
-    oc.cmd.header.command_type = EnetCommandType::Connect;
-    oc.cmd.header.channel_id = ControlChannel;
-    oc.cmd.header.flags = FlagValue::Reliable;
+    send_connect();
 
-    // We reproduce those bytes to be wire-compatible
-    // These constants seem somewhat random but are apparently required?
-    // In Wireshark these constants always seem to be sent, no matter what
-    // They're probably just magic constants
-    ByteArray payload(32, 0);
-    // [2..3] mtu
-    payload[2] = (uint8_t)(cfg_.mtu >> 8);
-    payload[3] = (uint8_t)(cfg_.mtu & 0xFF);
-    payload[6] = 128;
-    payload[11] = cfg_.channel_count;
-    payload[22] = 19;
-    payload[23] = 136;
-    payload[27] = 2;
-    payload[31] = 2;
-    oc.cmd.payload = payload;
-
-    queue_outgoing_reliable(std::move(oc));
-    flush_send_queue(false);
     return true;
 }
 
@@ -683,6 +677,33 @@ bool EnetPeer::dispatch_one() {
 
 int EnetPeer::create_time_base() {
     return (int)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+void EnetPeer::send_connect() {
+    // Send inital connect command
+    EnetOutCommand oc;
+    oc.cmd.header.command_type = EnetCommandType::Connect;
+    oc.cmd.header.channel_id = ControlChannel;
+    oc.cmd.header.flags = FlagValue::Reliable;
+
+    // Reproduce those bytes to be wire-compatible
+    // These constants seem somewhat random but are apparently required?
+    // In Wireshark these constants always seem to be sent, no matter what
+    // They're probably just magic constants
+    ByteArray payload(32, 0);
+    // [2..3] mtu
+    payload[2] = (uint8_t)(cfg_.mtu >> 8);
+    payload[3] = (uint8_t)(cfg_.mtu & 0xFF);
+    payload[6] = 128;
+    payload[11] = cfg_.channel_count;
+    payload[22] = 19;
+    payload[23] = 136;
+    payload[27] = 2;
+    payload[31] = 2;
+    oc.cmd.payload = payload;
+
+    queue_outgoing_reliable(std::move(oc));
+    flush_send_queue(false);
 }
 
 void EnetPeer::flush_send_queue(bool only_acks) {

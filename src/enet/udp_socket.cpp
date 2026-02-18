@@ -24,7 +24,12 @@ UdpSocket::UdpSocket() {
 #endif
 }
 
-UdpSocket::~UdpSocket() { close(); }
+UdpSocket::UdpSocket(SocketType native_handle) : sock_(native_handle), owning_(false) {}
+
+UdpSocket::~UdpSocket() {
+    if (owning_)
+        close();
+}
 
 void UdpSocket::close() {
 #if defined(_WIN32)

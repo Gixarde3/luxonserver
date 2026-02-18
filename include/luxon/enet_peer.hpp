@@ -80,6 +80,7 @@ using SocketType = int;
 class UdpSocket {
 public:
     UdpSocket();
+    UdpSocket(SocketType native_handle);
     ~UdpSocket();
 
     UdpSocket(const UdpSocket&) = delete;
@@ -112,6 +113,7 @@ private:
 #else
     int sock_ = -1;
 #endif
+    bool owning_ = true;
     bool connected_ = false;
 };
 
@@ -169,6 +171,7 @@ public:
     explicit EnetPeer(EnetPeerConfig cfg);
 
     // Client mode
+    bool use(UdpSocket& sock);
     bool connect(UdpSocket& sock, const std::string& host, uint16_t port);
     void disconnect(bool noflush = false);
 
@@ -219,6 +222,7 @@ public:
 
 private:
     // Core protocol helpers
+    void send_connect();
     int now_ms() const;
 
     size_t calculate_initial_offset() const; // 12 or 16 (CRC)
