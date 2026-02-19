@@ -24,7 +24,7 @@ UdpSocket::UdpSocket() {
 #endif
 }
 
-UdpSocket::UdpSocket(SocketType native_handle) : sock_(native_handle), owning_(false) {}
+UdpSocket::UdpSocket(SocketType native_handle) : sock_(native_handle), owning_(false), connected_(true) {}
 
 UdpSocket::~UdpSocket() {
     if (owning_)
