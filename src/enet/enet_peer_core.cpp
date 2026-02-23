@@ -170,7 +170,7 @@ const EnetChannel& EnetPeer::channel(uint8_t ch) const {
 }
 
 bool EnetPeer::send_payload(const ByteArray& payload, const EnetSendOptions& opt) {
-    if (state_ != EnetConnectionState::Connected && state_ != EnetConnectionState::Connecting)
+    if (state_ != EnetConnectionState::Connected)
         return false;
     if (opt.channel >= cfg_.channel_count)
         return false;
@@ -388,7 +388,7 @@ void EnetPeer::handle_fragment(const EnetCommand& fragment_cmd) {
     EnetChannel& ch = channel(fragment_cmd.header.channel_id);
     const bool sequenced = (fragment_cmd.header.command_type == EnetCommandType::SendFragment);
 
-    if (fragment_cmd.fragment_number > fragment_cmd.fragment_count || fragment_cmd.fragment_offset >= fragment_cmd.fragment_total_length ||
+    if (fragment_cmd.fragment_number >= fragment_cmd.fragment_count || fragment_cmd.fragment_offset >= fragment_cmd.fragment_total_length ||
         fragment_cmd.fragment_offset + fragment_cmd.payload.size() > fragment_cmd.fragment_total_length) {
         return;
     }
