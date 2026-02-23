@@ -150,37 +150,43 @@ EnetCommand parse_command(const uint8_t *data, size_t data_len, size_t& inout_of
     return cmd;
 }
 
-void write_command(ByteArray& out, const EnetCommand& cmd) {
-    // Compute total length
-    uint32_t total_len = static_cast<uint32_t>(kCmdHeaderSize);
+uint32_t compute_command_length(const EnetCommand& cmd) {
+    uint32_t fres = static_cast<uint32_t>(kCmdHeaderSize);
 
     switch (cmd.header.command_type) {
     case EnetCommandType::Acknowledge:
     case EnetCommandType::EgAcknowledgeUnsequenced:
-        total_len += 8;
-        total_len += static_cast<uint32_t>(cmd.payload.size());
+        fres += 8;
+        fres += static_cast<uint32_t>(cmd.payload.size());
         break;
 
     case EnetCommandType::SendUnreliable:
-        total_len += 4;
-        total_len += static_cast<uint32_t>(cmd.payload.size());
+        fres += 4;
+        fres += static_cast<uint32_t>(cmd.payload.size());
         break;
 
     case EnetCommandType::SendUnreliableUnsequenced:
-        total_len += 4;
-        total_len += static_cast<uint32_t>(cmd.payload.size());
+        fres += 4;
+        fres += static_cast<uint32_t>(cmd.payload.size());
         break;
 
     case EnetCommandType::SendFragment:
     case EnetCommandType::EgSendFragmentUnsequenced:
-        total_len += 20;
-        total_len += static_cast<uint32_t>(cmd.payload.size());
+        fres += 20;
+        fres += static_cast<uint32_t>(cmd.payload.size());
         break;
 
     default:
-        total_len += static_cast<uint32_t>(cmd.payload.size());
+        fres += static_cast<uint32_t>(cmd.payload.size());
         break;
     }
+
+    return fres;
+}
+
+void write_command(ByteArray& out, const EnetCommand& cmd) {
+    // Compute total length
+    const uint32_t total_len = compute_command_length(cmd);
 
     out.push_back(static_cast<uint8_t>(cmd.header.command_type));
     out.push_back(cmd.header.channel_id);

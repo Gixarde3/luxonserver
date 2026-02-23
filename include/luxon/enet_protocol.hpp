@@ -114,6 +114,7 @@ ByteArray create_packet(EnetPacketHeader header, const std::vector<EnetCommand>&
 
 // Helpers to serialize/deserialize individual commands
 EnetCommand parse_command(const uint8_t *data, size_t data_len, size_t& inout_offset);
+uint32_t compute_command_length(const EnetCommand& cmd);
 void write_command(ByteArray& out, const EnetCommand& cmd);
 
 // Size helpers

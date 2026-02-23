@@ -257,7 +257,8 @@ private:
     void update_rtt(int last_rtt);
 
     // Datagram building/sending
-    void flush_send_queue(bool only_acks);
+    bool flush_send_queue(bool only_acks);
+    bool send_datagram(const ByteArray& datagram);
 
 private:
     EnetPeerConfig cfg_;
@@ -317,6 +318,9 @@ private:
 
     // Dispatch queue: commands ready to deliver in order
     std::queue<EnetCommand> dispatch_queue_;
+
+    // Datagram queue: datagrams to be sent later
+    std::queue<ByteArray> datagram_queue_;
 };
 
 // Server that accepts peers and routes datagrams to them
