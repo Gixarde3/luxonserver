@@ -889,7 +889,7 @@ void EnetPeer::service() {
     while (dispatch_one())
         ;
 
-    // Send outgoing until empty-ish (we flush once per service)
+    // Send some outgoing commands
     send_outgoing_commands();
 }
 } // namespace enet
