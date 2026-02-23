@@ -237,8 +237,8 @@ private:
     void queue_outgoing_reliable(EnetOutCommand outcmd);
     void queue_outgoing_unreliable(EnetCommand cmd);
 
-    void send_outgoing_commands();
-    void send_acks_only();
+    bool send_outgoing_commands();
+    bool send_acks_only();
 
     bool are_reliable_commands_in_transit() const;
 

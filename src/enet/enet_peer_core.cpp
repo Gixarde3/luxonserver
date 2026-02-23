@@ -878,8 +878,8 @@ bool EnetPeer::send_datagram(const ByteArray& datagram) {
         return sock_->send_connected(datagram.data(), datagram.size());
 }
 
-void EnetPeer::send_outgoing_commands() { flush_send_queue(false); }
-void EnetPeer::send_acks_only() { flush_send_queue(true); }
+bool EnetPeer::send_outgoing_commands() { return flush_send_queue(false); }
+bool EnetPeer::send_acks_only() { return flush_send_queue(true); }
 
 void EnetPeer::service() {
     if (state_ == EnetConnectionState::Disconnected)
