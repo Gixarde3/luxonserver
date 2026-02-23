@@ -388,11 +388,6 @@ void EnetPeer::handle_fragment(const EnetCommand& fragment_cmd) {
     EnetChannel& ch = channel(fragment_cmd.header.channel_id);
     const bool sequenced = (fragment_cmd.header.command_type == EnetCommandType::SendFragment);
 
-    if (fragment_cmd.fragment_number >= fragment_cmd.fragment_count || fragment_cmd.fragment_offset >= fragment_cmd.fragment_total_length ||
-        fragment_cmd.fragment_offset + fragment_cmd.payload.size() > fragment_cmd.fragment_total_length) {
-        return;
-    }
-
     EnetCommand start;
     if (!ch.try_get_fragment(fragment_cmd.fragment_start_seq, sequenced, start))
         return;
@@ -552,9 +547,17 @@ void EnetPeer::execute_command(const EnetCommand& cmd) {
 
     case EnetCommandType::SendFragment:
     case EnetCommandType::EgSendFragmentUnsequenced: {
-        if (state_ == EnetConnectionState::Connected)
+        if (state_ == EnetConnectionState::Connected) {
+            // Check fragment sanity
+            if (cmd.fragment_number >= cmd.fragment_count || cmd.fragment_offset >= cmd.fragment_total_length ||
+                cmd.fragment_offset + cmd.payload.size() > cmd.fragment_total_length) {
+                // Invalid fragment, drop immediately to avoid corrupting the reassembly buffer
+                break;
+            }
+
             if (queue_incoming_command(cmd))
                 handle_fragment(cmd);
+        }
         break;
     }
 
@@ -744,13 +747,19 @@ bool EnetPeer::flush_send_queue(bool only_acks) {
             }
         }
 
-        // Requeue in FIFO order
+        // Extract lost commands first
+        std::vector<EnetOutCommand> extracted;
+        extracted.reserve(to_resend.size());
+
         std::sort(to_resend.begin(), to_resend.end());
         for (auto it = to_resend.rbegin(); it != to_resend.rend(); ++it) {
-            EnetOutCommand cmd = sent_reliable_[*it];
-            sent_reliable_.erase(sent_reliable_.begin() + (ptrdiff_t)(*it));
-            queue_outgoing_reliable(std::move(cmd));
+            extracted.emplace_back(std::move(sent_reliable_[*it]));
+            sent_reliable_.erase(sent_reliable_.begin() + static_cast<ptrdiff_t>(*it));
         }
+
+        // Re-queue in the correct chronological (FIFO) order
+        for (auto it = extracted.rbegin(); it != extracted.rend(); ++it)
+            queue_outgoing_reliable(std::move(*it));
 
         if (!sent_reliable_.empty())
             timeout_int_ = time_int_ + 25;
