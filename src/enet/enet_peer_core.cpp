@@ -776,107 +776,112 @@ bool EnetPeer::flush_send_queue(bool only_acks) {
         queue_outgoing_reliable(std::move(ping));
     }
 
-    // Build packet up to MTU
-    std::vector<EnetCommand> cmds_to_send;
-    cmds_to_send.reserve(64);
-    bool has_reliable_data = false;
+    // Keep building as many datagrams as we can
+    while (true) {
+        // Build packet up to MTU
+        std::vector<EnetCommand> cmds_to_send;
+        cmds_to_send.reserve(64);
+        bool has_reliable_data = false;
 
-    const size_t header_size = calculate_initial_offset();
-    const size_t mtu = cfg_.mtu;
+        const size_t header_size = calculate_initial_offset();
+        const size_t mtu = cfg_.mtu;
 
-    size_t used = header_size;
-    outgoing_command_count_ = 0;
+        size_t used = header_size;
+        outgoing_command_count_ = 0;
 
-    // Serialize ACK pool first (each ack is exactly 20 bytes)
-    while (!outgoing_ack_pool_.empty()) {
-        if (used + 20 > mtu)
+        // Serialize ACK pool first (each ack is exactly 20 bytes)
+        while (!outgoing_ack_pool_.empty()) {
+            if (used + 20 > mtu)
+                break;
+
+            // Reuse command parser on a fake buffer that begins with the ack header (command parser expects command header at 0)
+            // We'll just parse via manual decode:
+            const ByteArray& b = outgoing_ack_pool_.front();
+            if (b.size() != 20) {
+                outgoing_ack_pool_.pop_front();
+                continue;
+            }
+
+            EnetCommand ack;
+            ack.header.command_type = static_cast<EnetCommandType>(b[0]);
+            ack.header.channel_id = b[1];
+            ack.header.flags = b[2];
+            ack.header.reserved = b[3];
+            // length and reliable_seq are ignored by ack semantics, but parse anyways:
+            ack.header.command_length = (uint32_t)((b[4] << 24) | (b[5] << 16) | (b[6] << 8) | b[7]);
+            ack.header.reliable_seq = (uint32_t)((b[8] << 24) | (b[9] << 16) | (b[10] << 8) | b[11]);
+            ack.ack_received_reliable_sequence_number = (uint32_t)((b[12] << 24) | (b[13] << 16) | (b[14] << 8) | b[15]);
+            ack.ack_received_sent_time = (uint32_t)((b[16] << 24) | (b[17] << 16) | (b[18] << 8) | b[19]);
+
+            cmds_to_send.push_back(std::move(ack));
+            outgoing_ack_pool_.pop_front();
+            used += 20;
+            outgoing_command_count_++;
+        }
+
+        if (!only_acks) {
+            // outgoing commands per channel
+            for (auto& chptr : channels_) {
+                EnetChannel& ch = *chptr;
+
+                // reliable first
+                while (!ch.outgoing_reliable.empty()) {
+                    auto oc = ch.outgoing_reliable.front();
+                    const auto length = compute_command_length(oc.cmd);
+                    if (used + length > mtu)
+                        break;
+
+                    // Mark as sent reliable and track for resends
+                    queue_sent_reliable(oc);
+
+                    cmds_to_send.push_back(std::move(oc.cmd));
+                    ch.outgoing_reliable.pop();
+                    used += length;
+                    outgoing_command_count_++;
+
+                    has_reliable_data = true;
+                }
+
+                // unreliable
+                while (!ch.outgoing_unreliable.empty()) {
+                    EnetCommand c = ch.outgoing_unreliable.front();
+
+                    const auto length = compute_command_length(c);
+                    if (used + length > mtu)
+                        break;
+
+                    cmds_to_send.push_back(std::move(c));
+                    ch.outgoing_unreliable.pop();
+                    used += length;
+                    outgoing_command_count_++;
+                }
+            }
+        }
+
+        if (cmds_to_send.empty())
             break;
 
-        // Reuse command parser on a fake buffer that begins with the ack header (command parser expects command header at 0)
-        // We'll just parse via manual decode:
-        const ByteArray& b = outgoing_ack_pool_.front();
-        if (b.size() != 20) {
-            outgoing_ack_pool_.pop_front();
-            continue;
-        }
+        EnetPacketHeader hdr;
+        hdr.peer_id = peer_id_;
+        hdr.type = cfg_.crc_enabled ? EnetUdpHeaderType::PlainWithCrc : EnetUdpHeaderType::PlainNoCrc;
+        hdr.command_count = outgoing_command_count_;
+        hdr.sent_time = (uint32_t)time_int_;
+        hdr.challenge = challenge_;
 
-        EnetCommand ack;
-        ack.header.command_type = static_cast<EnetCommandType>(b[0]);
-        ack.header.channel_id = b[1];
-        ack.header.flags = b[2];
-        ack.header.reserved = b[3];
-        // length and reliable_seq are ignored by ack semantics, but parse anyways:
-        ack.header.command_length = (uint32_t)((b[4] << 24) | (b[5] << 16) | (b[6] << 8) | b[7]);
-        ack.header.reliable_seq = (uint32_t)((b[8] << 24) | (b[9] << 16) | (b[10] << 8) | b[11]);
-        ack.ack_received_reliable_sequence_number = (uint32_t)((b[12] << 24) | (b[13] << 16) | (b[14] << 8) | b[15]);
-        ack.ack_received_sent_time = (uint32_t)((b[16] << 24) | (b[17] << 16) | (b[18] << 8) | b[19]);
+        ByteArray datagram = create_packet(hdr, cmds_to_send);
+        bytes_out_ += datagram.size();
 
-        cmds_to_send.push_back(std::move(ack));
-        outgoing_ack_pool_.pop_front();
-        used += 20;
-        outgoing_command_count_++;
-    }
-
-    if (!only_acks) {
-        // outgoing commands per channel
-        for (auto& chptr : channels_) {
-            EnetChannel& ch = *chptr;
-
-            // reliable first
-            while (!ch.outgoing_reliable.empty()) {
-                auto oc = ch.outgoing_reliable.front();
-                const auto length = compute_command_length(oc.cmd);
-                if (used + length > mtu)
-                    break;
-
-                // Mark as sent reliable and track for resends
-                queue_sent_reliable(oc);
-
-                cmds_to_send.push_back(std::move(oc.cmd));
-                ch.outgoing_reliable.pop();
-                used += length;
-                outgoing_command_count_++;
-
-                has_reliable_data = true;
-            }
-
-            // unreliable
-            while (!ch.outgoing_unreliable.empty()) {
-                EnetCommand c = ch.outgoing_unreliable.front();
-
-                const auto length = compute_command_length(c);
-                if (used + length > mtu)
-                    break;
-
-                cmds_to_send.push_back(std::move(c));
-                ch.outgoing_unreliable.pop();
-                used += length;
-                outgoing_command_count_++;
+        // Try to send datagram
+        if (!send_datagram(datagram)) {
+            // Failure, send again later if there's any reliable data in it
+            if (has_reliable_data) {
+                datagram_queue_.emplace(std::move(datagram));
+                return false;
             }
         }
     }
 
-    if (cmds_to_send.empty())
-        return true;
-
-    EnetPacketHeader hdr;
-    hdr.peer_id = peer_id_;
-    hdr.type = cfg_.crc_enabled ? EnetUdpHeaderType::PlainWithCrc : EnetUdpHeaderType::PlainNoCrc;
-    hdr.command_count = outgoing_command_count_;
-    hdr.sent_time = (uint32_t)time_int_;
-    hdr.challenge = challenge_;
-
-    ByteArray datagram = create_packet(hdr, cmds_to_send);
-    bytes_out_ += datagram.size();
-
-    // Try to send datagram
-    if (!send_datagram(datagram)) {
-        // Failure, send again later if there's any reliable data in it
-        if (has_reliable_data) {
-            datagram_queue_.emplace(std::move(datagram));
-            return false;
-        }
-    }
+    // No datagrams had to be queued up
     return true;
 }
 
@@ -890,16 +895,16 @@ bool EnetPeer::send_datagram(const ByteArray& datagram) {
 bool EnetPeer::send_outgoing_commands() { return flush_send_queue(false); }
 bool EnetPeer::send_acks_only() { return flush_send_queue(true); }
 
-void EnetPeer::service() {
+bool EnetPeer::service() {
     if (state_ == EnetConnectionState::Disconnected)
-        return;
+        return true;
 
     // Dispatch incoming until empty
     while (dispatch_one())
         ;
 
     // Send some outgoing commands
-    send_outgoing_commands();
+    return send_outgoing_commands();
 }
 } // namespace enet
 } // namespace luxon

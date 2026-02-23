@@ -187,7 +187,7 @@ public:
     bool send_payload(const ByteArray& payload, const EnetSendOptions& opt);
 
     // Process timers + resend + ping + send outgoing datagrams
-    void service();
+    bool service();
 
     // Feed datagrams received from socket. This parses, checks challenge, handles ACKs, handles sequencing and fragmentation
     // and queues payloads for dispatch
@@ -334,7 +334,7 @@ public:
         service_peers();
     }
     void service_self();
-    void service_peers();
+    bool service_peers();
 
     // Called when a new peer is created (after receiving EnetCommandType::Connect).
     std::function<void(std::shared_ptr<EnetPeer>)> on_peer_connected;

@@ -98,9 +98,11 @@ void EnetServer::service_self() {
     }
 }
 
-void EnetServer::service_peers() {
+bool EnetServer::service_peers() {
     for (auto& [ep, peer] : peers_by_ep_)
-        peer->service();
+        if (!peer->service())
+            return false; // Stop if datagrams had to be queued up
+    return true;
 }
 } // namespace enet
 } // namespace luxon
