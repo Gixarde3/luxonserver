@@ -53,6 +53,14 @@ struct EnetPeerConfig {
     uint8_t max_resends = 7; // Allows about 20 seconds of resends
     uint8_t fast_resend_count = 0;
     int max_pending_unreliable_commands = 0;
+
+    // Parse incoming connect command and extract configuration
+    void apply_connect_command(const EnetCommand& cmd) {
+        if (cmd.header.command_type == EnetCommandType::Connect && cmd.payload.size() >= 12) {
+            mtu = static_cast<uint16_t>((cmd.payload[2] << 8) | cmd.payload[3]);
+            channel_count = cmd.payload[11];
+        }
+    }
 };
 
 EnetDeliveryMode FlagsToEnetDeliveryMode(uint8_t flags);

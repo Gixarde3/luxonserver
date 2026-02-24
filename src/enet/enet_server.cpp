@@ -63,18 +63,22 @@ void EnetServer::service_self() {
         auto itp = peers_by_ep_.find(from);
         if (itp == peers_by_ep_.end()) {
             // Only accept if contains Connect command
-            bool has_connect = false;
+            const EnetCommand *connect_cmd = nullptr;
             for (auto& c : cmds) {
                 if (c.header.command_type == EnetCommandType::Connect) {
-                    has_connect = true;
+                    connect_cmd = &c;
                     break;
                 }
             }
-            if (!has_connect)
+            if (!connect_cmd)
                 continue;
 
-            int16_t assigned = next_peer_id_++;
-            auto peer = std::make_shared<EnetPeer>(cfg_);
+            // Apply connect payload settings
+            EnetPeerConfig peer_cfg = cfg_;
+            peer_cfg.apply_connect_command(*connect_cmd);
+
+            const int16_t assigned = next_peer_id_++;
+            auto peer = std::make_shared<EnetPeer>(peer_cfg);
             peer->attach_server_side(sock_, from, assigned, hdr.challenge);
 
             peers_by_ep_[from] = peer;
