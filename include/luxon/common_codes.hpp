@@ -183,8 +183,10 @@ enum Enum : uint8_t {
     Region = 210,
     Cluster = 196,
     UriPath = 209,
-    FindFriendsResponseRoomIdList = 2,
     FindFriendsResponseOnlineList = 1,
+    FindFriendsResponseRoomIdList = 2,
+    FindFriendsRequestList = 1,
+    FindFriendsOptions = 2
 };
 } // namespace AuthAndLobby
 
@@ -362,13 +364,13 @@ enum Enum : uint8_t {
 // https://web.archive.org/web/20260204185936/https://doc-api.photonengine.com/en/pun/current/class_photon_1_1_realtime_1_1_room_options.html
 namespace GameFlags {
 enum Enum : uint32_t {
-    CheckUserOnJoin = 0x01,
-    DeleteCacheOnLeave = 0x02,
-    SuppressRoomEvents = 0x04,
-    PublishUserId = 0x08,
-    DeleteNullProps = 0x10,
-    BroadcastPropsChangeToAll = 0x20,
-    SuppressPlayerInfo = 0x40,
+    CheckUserOnJoin = 1,
+    DeleteCacheOnLeave = 2,
+    SuppressRoomEvents = 4,
+    PublishUserId = 8,
+    DeleteNullProps = 16,
+    BroadcastPropsChangeToAll = 32,
+    SuppressPlayerInfo = 64,
 };
 } // namespace GameFlags
 
@@ -418,4 +420,9 @@ enum Enum : uint8_t {
     AsyncLobby = 3,
 };
 } // namespace LobbyType
+
+// Guessed and checked via black box test
+namespace FindFriendsOptions {
+enum Enum : int32_t { Default = 0, CreatedOnGS = 1, Visible = 2, Open = 4 };
+}
 } // namespace luxon
