@@ -90,8 +90,7 @@ std::expected<ByteArray, Error> IProtocol::maybe_encrypt_payload(Kind kind, bool
     if (!encrypt_flag)
         return ByteArray(payload.begin(), payload.end());
 
-    // Init/InitResponse/Disconnect never encrypted
-    if (kind == Kind::Init || kind == Kind::InitResponse || kind == Kind::DisconnectMessage)
+    if (kind == Kind::Init || kind == Kind::InitResponse)
         return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "init/initresponse cannot be encrypted"});
 
     return crypto_.EncryptPayload(payload);
@@ -101,7 +100,7 @@ std::expected<ByteArray, Error> IProtocol::maybe_decrypt_payload(Kind kind, bool
     if (!encrypted_flag)
         return ByteArray(payload.begin(), payload.end());
 
-    if (kind == Kind::Init || kind == Kind::InitResponse || kind == Kind::DisconnectMessage)
+    if (kind == Kind::Init || kind == Kind::InitResponse)
         return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "init/initresponse marked encrypted"});
 
     return crypto_.DecryptPayload(payload);
