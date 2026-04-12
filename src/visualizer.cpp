@@ -107,12 +107,25 @@ void print_value(const ser::Value& value, int indent) {
                     print_value(v[i], indent + 2);
                 }
 
+            } else if constexpr (std::is_same_v<T, ser::JaggedArray>) {
+                std::cout << prefix << "jagged_array[" << v.elements.size() << "]:\n";
+                for (size_t i = 0; i < v.elements.size(); ++i) {
+                    std::cout << prefix << "  [" << i << "]:\n";
+                    print_value(v.elements[i], indent + 2);
+                }
+
             } else if constexpr (helpers::is_vector_v<T>) {
                 // vectors of primitives/strings/etc
                 std::cout << prefix << "array[" << v.size() << "]:\n";
                 for (size_t i = 0; i < v.size(); ++i) {
                     std::cout << prefix << "  [" << i << "]:\n";
-                    print_value(ser::Value(v[i]), indent + 2);
+                    if constexpr (std::is_same_v<T, std::vector<bool>>) {
+                        // Explicitly cast proxy object to bool for std::vector<bool>
+                        print_value(ser::Value(static_cast<bool>(v[i])), indent + 2);
+                    } else {
+                        // Standard constructor for everything else
+                        print_value(ser::Value(v[i]), indent + 2);
+                    }
                 }
 
             } else if constexpr (std::is_same_v<T, ser::Dictionary>) {
@@ -120,6 +133,22 @@ void print_value(const ser::Value& value, int indent) {
                 for (const auto& [key, val] : v) {
                     std::cout << prefix << "  " << (int)key << ":\n";
                     print_value(val, indent + 2);
+                }
+
+            } else if constexpr (std::is_same_v<T, ser::GenericDictionary>) {
+                std::cout << prefix << "generic_dictionary[" << v.entries.size() << "]:\n";
+                if (!v.header.empty()) {
+                    std::cout << prefix << "  header: ";
+                    for (auto byte : v.header) {
+                        std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)byte << " ";
+                    }
+                    std::cout << std::dec << "\n";
+                }
+                for (size_t i = 0; i < v.entries.size(); ++i) {
+                    std::cout << prefix << "  [" << i << "] key:\n";
+                    print_value(v.entries[i].first, indent + 2);
+                    std::cout << prefix << "  [" << i << "] value:\n";
+                    print_value(v.entries[i].second, indent + 2);
                 }
 
             } else if constexpr (std::is_same_v<T, ser::HashtablePtr>) {
@@ -138,6 +167,20 @@ void print_value(const ser::Value& value, int indent) {
             } else if constexpr (std::is_same_v<T, ser::RawCustomValue>) {
                 std::cout << prefix << "custom[" << v.data.size() << "], code=" << (int)v.custom_code << "\n";
                 helpers::print_hex_dump(v.data, indent + 1);
+
+            } else if constexpr (std::is_same_v<T, ser::EventMessage>) {
+                std::cout << prefix << "EventData (Code: " << (int)v.event_code << ")\n";
+                print_parameters(v.parameters, indent + 1);
+
+            } else if constexpr (std::is_same_v<T, ser::OperationRequestMessage>) {
+                std::cout << prefix << "OperationRequest (Code: " << (int)v.operation_code << ")\n";
+                print_parameters(v.parameters, indent + 1);
+
+            } else if constexpr (std::is_same_v<T, ser::OperationResponseMessage>) {
+                std::cout << prefix << "OperationResponse (Code: " << (int)v.operation_code << ", ReturnCode: " << v.return_code << ")\n";
+                if (v.debug_message)
+                    std::cout << prefix << "  DebugMsg: " << *v.debug_message << "\n";
+                print_parameters(v.parameters, indent + 1);
 
             } else {
                 std::cout << prefix << "[unhandled value type]\n";
