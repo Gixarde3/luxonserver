@@ -86,6 +86,8 @@ inline std::expected<void, Error> write_string_payload(ByteWriter& w, const std:
 
 inline std::expected<std::string, Error> read_string_payload(ByteReader& r) {
     LUXON_TRY_ASSIGN(len, r.read_varuint32());
+    if (len > 32767)
+        return err(Error::Code::InvalidValue, "string UTF-8 length exceeds 32767");
     LUXON_TRY_ASSIGN(bytes, r.read_span(static_cast<std::size_t>(len)));
     return std::string(reinterpret_cast<const char *>(bytes.data()), bytes.size());
 }
