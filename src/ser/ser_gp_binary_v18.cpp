@@ -3,6 +3,7 @@
 
 #include "ser_gp_binary_v18.hpp"
 
+#include <iostream>
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -59,8 +60,6 @@ enum : uint8_t {
     TC_StringArray = 71,
     TC_CompressedInt32Array = 73,
     TC_CompressedInt64Array = 74,
-
-    TC_UnknownStub_83 = 83,
 };
 
 // -------------------- Parameters --------------------
@@ -678,12 +677,7 @@ std::expected<Value, Error> GpBinaryV18::decode_value(ByteReader& r, int depth) 
         return Value(std::move(out));
     }
 
-    case TC_UnknownStub_83: {
-        return r.read_i16_le().value_or(0);
-    }
-
     default:
-        r.read_i16_le();
         return std::unexpected(Error{.code = Error::Code::UnsupportedTypeCode, .message = "unknown type code"});
     }
 }
