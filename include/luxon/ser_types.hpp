@@ -56,7 +56,7 @@ struct GenericDictionary {
     ByteArray header{};
     std::vector<std::pair<Value, Value>> entries{};
 
-    bool operator==(const GenericDictionary& other) const = default;
+    bool operator==(const GenericDictionary& other) const;
 };
 
 struct InitMessage {
