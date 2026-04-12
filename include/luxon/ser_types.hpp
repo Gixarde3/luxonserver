@@ -1,6 +1,3 @@
-// Copyright (c) 2026, the Luxon contributors
-// SPDX-License-Identifier: BSD-3-Clause
-
 #pragma once
 
 #include <array>
@@ -18,7 +15,6 @@
 #include <vector>
 
 namespace luxon::ser {
-
 using ByteArray = std::vector<uint8_t>;
 
 struct RawCustomValue {
@@ -48,28 +44,107 @@ public:
     const Value& operator[](uint8_t key) const;
 };
 
+using ParameterList = Dictionary;
+
+struct JaggedArray {
+    std::vector<Value> elements{};
+
+    bool operator==(const JaggedArray& other) const = default;
+};
+
+struct GenericDictionary {
+    ByteArray header{};
+    std::vector<std::pair<Value, Value>> entries{};
+
+    bool operator==(const GenericDictionary& other) const = default;
+};
+
+struct InitMessage {
+    uint8_t protocol_major = 1;
+    uint8_t protocol_minor = 8;
+    uint8_t client_sdk_id = 15;
+    bool ipv6{};
+    uint8_t version_major = 4;
+    uint8_t version_minor = 1;
+    uint8_t version_patch = 6;
+    uint8_t version_revision = 8;
+    std::string app_id{};
+};
+
+struct InitResponseMessage {};
+
+struct EventMessage {
+    uint8_t event_code{};
+    ParameterList parameters{};
+
+    bool operator==(const EventMessage& other) const = default;
+};
+
+struct OperationRequestMessage {
+    uint8_t operation_code{};
+    ParameterList parameters{};
+
+    bool operator==(const OperationRequestMessage& other) const = default;
+};
+
+struct OperationResponseMessage {
+    uint8_t operation_code{};
+    int16_t return_code{};
+    std::optional<std::string> debug_message{};
+    ParameterList parameters{};
+
+    bool operator==(const OperationResponseMessage& other) const = default;
+};
+
+struct DisconnectMessage {
+    int16_t code{};
+    std::optional<std::string> message{};
+    ParameterList parameters{};
+};
+
+struct InternalOperationRequestMessage {
+    uint8_t operation_code{};
+    ParameterList parameters{};
+};
+
+struct InternalOperationResponseMessage {
+    uint8_t operation_code{};
+    int16_t return_code{};
+    std::optional<std::string> debug_message{};
+    ParameterList parameters{};
+};
+
 struct Value {
-    using VariantType = std::variant<std::monostate,           // null
-                                     bool,                     // boolean
-                                     uint8_t,                  // byte
-                                     int16_t,                  // short
-                                     int32_t,                  // int
-                                     int64_t,                  // long
-                                     float,                    // float
-                                     double,                   // double
-                                     std::string,              // string
-                                     ByteArray,                // byte array
-                                     std::vector<bool>,        // boolean array
-                                     std::vector<int16_t>,     // short array
-                                     std::vector<int32_t>,     // int array
-                                     std::vector<int64_t>,     // long array
-                                     std::vector<float>,       // float array
-                                     std::vector<double>,      // double array
-                                     std::vector<std::string>, // string array
-                                     ObjectArray,              // object array
-                                     Dictionary,               // dictionary<byte, value>
-                                     HashtablePtr,             // hashtable<value, value>
-                                     RawCustomValue            // custom type
+    using VariantType = std::variant<std::monostate,                 // null
+                                     bool,                           // boolean
+                                     uint8_t,                        // byte
+                                     int16_t,                        // short
+                                     int32_t,                        // int
+                                     int64_t,                        // long
+                                     float,                          // float
+                                     double,                         // double
+                                     std::string,                    // string
+                                     ByteArray,                      // byte array
+                                     std::vector<bool>,              // boolean array
+                                     std::vector<int16_t>,           // short array
+                                     std::vector<int32_t>,           // int array
+                                     std::vector<int64_t>,           // long array
+                                     std::vector<float>,             // float array
+                                     std::vector<double>,            // double array
+                                     std::vector<std::string>,       // string array
+                                     ObjectArray,                    // object array (0x17)
+                                     JaggedArray,                    // array/jagged array (0x40)
+                                     Dictionary,                     // convenience dictionary<byte,object>
+                                     GenericDictionary,              // exact generic dictionary
+                                     HashtablePtr,                   // hashtable
+                                     RawCustomValue,                 // custom type
+                                     EventMessage,                   // event data
+                                     OperationRequestMessage,        // operation request
+                                     OperationResponseMessage,       // operation response
+                                     std::vector<Dictionary>,        // convenience dictionary array
+                                     std::vector<GenericDictionary>, // exact generic dictionary array
+                                     std::vector<HashtablePtr>,      // hashtable array
+                                     std::vector<RawCustomValue>     // custom type array
                                      >;
 
     VariantType value;
@@ -144,13 +219,24 @@ struct Value {
 
     template <typename T> std::optional<T> get_optional() const {
         if (const T *ptr = std::get_if<T>(&value)) {
-            return *ptr; // copy
+            return *ptr;
         }
         return std::nullopt;
     }
 
     bool operator==(const Value& other) const;
 };
+
+struct GenericValueMessage {
+    Value value{};
+};
+
+struct RawMessage {
+    ByteArray bytes{};
+};
+
+using MessageVariant = std::variant<InitMessage, InitResponseMessage, OperationRequestMessage, OperationResponseMessage, EventMessage, DisconnectMessage,
+                                    InternalOperationRequestMessage, InternalOperationResponseMessage, GenericValueMessage, RawMessage>;
 
 struct Error {
     enum class Code : uint8_t {
@@ -189,68 +275,6 @@ enum class Kind : uint8_t {
     RawMessage = 9,
 };
 
-struct InitMessage {
-    uint8_t protocol_major = 1;
-    uint8_t protocol_minor = 8;
-    uint8_t client_sdk_id = 15;
-    bool ipv6{};
-    uint8_t version_major = 4;
-    uint8_t version_minor = 1;
-    uint8_t version_patch = 6;
-    uint8_t version_revision = 8;
-    std::string app_id{};
-};
-
-struct InitResponseMessage {
-};
-
-using ParameterList = Dictionary;
-
-struct EventMessage {
-    uint8_t event_code{};
-    ParameterList parameters{};
-};
-
-struct OperationRequestMessage {
-    uint8_t operation_code{};
-    ParameterList parameters{};
-};
-
-struct OperationResponseMessage {
-    uint8_t operation_code{};
-    int16_t return_code{};
-    std::optional<std::string> debug_message{};
-    ParameterList parameters{};
-};
-
-struct DisconnectMessage {
-    int16_t code{};
-    std::optional<std::string> message{};
-    ParameterList parameters{};
-};
-
-struct InternalOperationRequestMessage {
-    uint8_t operation_code{};
-    ParameterList parameters{};
-};
-
-struct InternalOperationResponseMessage {
-    uint8_t operation_code{};
-    int16_t return_code{};
-    std::optional<std::string> debug_message{};
-    ParameterList parameters{};
-};
-
-struct GenericValueMessage {
-    Value value{};
-};
-
-struct RawMessage {
-    ByteArray bytes{};
-};
-
-using MessageVariant = std::variant<InitMessage, InitResponseMessage, OperationRequestMessage, OperationResponseMessage, EventMessage, DisconnectMessage,
-                                    InternalOperationRequestMessage, InternalOperationResponseMessage, GenericValueMessage, RawMessage>;
 struct Message : public MessageVariant {
     bool encrypted = false;
 

@@ -37,16 +37,21 @@ public:
     void write_f32_be(float v) { write_pod_be(v); }
     void write_f64_be(double v) { write_pod_be(v); }
 
-    void write_varuint(uint64_t v) {
+    void write_varuint32(uint32_t v) { write_varuint64(v); }
+
+    void write_varuint64(uint64_t v) {
         while (v >= 0x80) {
-            write_u8(static_cast<uint8_t>(v) | 0x80);
+            write_u8(static_cast<uint8_t>(v & 0x7F) | 0x80);
             v >>= 7;
         }
         write_u8(static_cast<uint8_t>(v));
     }
 
+    // backwards-compatible alias
+    void write_varuint(uint64_t v) { write_varuint64(v); }
+
     void write_string(const std::string& s) {
-        write_varuint(s.size());
+        write_varuint64(static_cast<uint64_t>(s.size()));
         write_bytes(std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(s.data()), s.size()));
     }
 
@@ -120,7 +125,34 @@ public:
     std::expected<float, Error> read_f32_be() { return read_pod_be<float>(); }
     std::expected<double, Error> read_f64_be() { return read_pod_be<double>(); }
 
-    std::expected<uint64_t, Error> read_varuint() {
+    std::expected<uint32_t, Error> read_varuint32() {
+        uint32_t result = 0;
+        int shift = 0;
+
+        for (int i = 0; i < 5; ++i) {
+            auto b = read_u8();
+            if (!b)
+                return std::unexpected(b.error());
+
+            const uint8_t byte = *b;
+            if (i == 4) {
+                if ((byte & 0x80) != 0)
+                    return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "varuint32 too long"});
+                if ((byte & 0xF0) != 0)
+                    return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "varuint32 overflow"});
+            }
+
+            result |= (static_cast<uint32_t>(byte & 0x7F) << shift);
+            if ((byte & 0x80) == 0)
+                return result;
+
+            shift += 7;
+        }
+
+        return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "varuint32 too long"});
+    }
+
+    std::expected<uint64_t, Error> read_varuint64() {
         uint64_t result = 0;
         int shift = 0;
 
@@ -129,23 +161,29 @@ public:
             if (!b)
                 return std::unexpected(b.error());
 
-            uint64_t chunk = (*b & 0x7FULL);
-            if (shift >= 64 && chunk != 0)
-                return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "varuint overflow"});
+            const uint8_t byte = *b;
+            if (i == 9) {
+                if ((byte & 0x80) != 0)
+                    return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "varuint64 too long"});
+                if ((byte & 0xFE) != 0)
+                    return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "varuint64 overflow"});
+            }
 
-            result |= (chunk << shift);
-
-            if (((*b) & 0x80) == 0)
+            result |= (static_cast<uint64_t>(byte & 0x7F) << shift);
+            if ((byte & 0x80) == 0)
                 return result;
 
             shift += 7;
         }
 
-        return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "varuint too long"});
+        return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "varuint64 too long"});
     }
 
+    // backwards-compatible alias
+    std::expected<uint64_t, Error> read_varuint() { return read_varuint64(); }
+
     std::expected<std::string, Error> read_string() {
-        auto len = read_varuint();
+        auto len = read_varuint64();
         if (!len)
             return std::unexpected(len.error());
         if (*len > static_cast<uint64_t>(std::numeric_limits<std::size_t>::max()))

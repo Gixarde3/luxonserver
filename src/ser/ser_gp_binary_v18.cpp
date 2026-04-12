@@ -3,22 +3,21 @@
 
 #include "ser_gp_binary_v18.hpp"
 
-#include <iostream>
 #include <algorithm>
 #include <bit>
-#include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <limits>
+#include <memory>
+#include <string_view>
 
 namespace luxon::ser {
 namespace {
-inline bool f32_is_pos_zero(float a) noexcept { return std::bit_cast<uint32_t>(a) == 0u; }
-inline bool f64_is_pos_zero(double a) noexcept { return std::bit_cast<uint64_t>(a) == 0u; }
-} // namespace
 
 // -------------------- Type codes --------------------
 
 enum : uint8_t {
+    TC_Unknown = 0,
     TC_Boolean = 2,
     TC_Byte = 3,
     TC_Int16 = 4,
@@ -40,6 +39,9 @@ enum : uint8_t {
     TC_Dictionary = 20,
     TC_Hashtable = 21,
     TC_ObjectArray = 23,
+    TC_OperationRequest = 24,
+    TC_OperationResponse = 25,
+    TC_EventData = 26,
 
     TC_BoolFalse = 27,
     TC_BoolTrue = 28,
@@ -60,7 +62,1024 @@ enum : uint8_t {
     TC_StringArray = 71,
     TC_CompressedInt32Array = 73,
     TC_CompressedInt64Array = 74,
+
+    TC_CustomTypeArray = 83,
+    TC_DictionaryArray = 84,
+    TC_HashtableArray = 85,
 };
+
+struct DictHeaderDesc;
+
+struct TypeDesc {
+    enum class Kind : uint8_t {
+        Object,
+        Boolean,
+        Byte,
+        Short,
+        Float,
+        Double,
+        String,
+        Int,
+        Long,
+        Hashtable,
+        Dictionary,
+        ObjectArray,
+        BooleanArray,
+        ByteArray,
+        ShortArray,
+        FloatArray,
+        DoubleArray,
+        StringArray,
+        IntArray,
+        LongArray,
+        HashtableArray,
+        JaggedArray,
+    };
+
+    Kind kind{};
+    std::shared_ptr<DictHeaderDesc> dict{};
+    std::shared_ptr<TypeDesc> element{};
+};
+
+struct DictHeaderDesc {
+    uint8_t key_code{};
+    TypeDesc value{};
+    ByteArray raw{};
+};
+
+inline bool is_array_value(const Value& v) {
+    return v.is<ByteArray>() || v.is<std::vector<bool>>() || v.is<std::vector<int16_t>>() || v.is<std::vector<int32_t>>() || v.is<std::vector<int64_t>>() ||
+           v.is<std::vector<float>>() || v.is<std::vector<double>>() || v.is<std::vector<std::string>>() || v.is<ObjectArray>() || v.is<JaggedArray>() ||
+           v.is<std::vector<Dictionary>>() || v.is<std::vector<GenericDictionary>>() || v.is<std::vector<HashtablePtr>>() ||
+           v.is<std::vector<RawCustomValue>>();
+}
+
+std::expected<void, Error> write_size32(ByteWriter& w, std::size_t n, std::string_view what) {
+    if (n > static_cast<std::size_t>(std::numeric_limits<uint32_t>::max())) {
+        return std::unexpected(Error{
+            .code = Error::Code::InvalidValue,
+            .message = std::string(what) + " too large",
+        });
+    }
+    w.write_varuint32(static_cast<uint32_t>(n));
+    return {};
+}
+
+std::expected<void, Error> write_string_v18(ByteWriter& w, const std::string& s) {
+    if (s.size() > 32767) {
+        return std::unexpected(Error{
+            .code = Error::Code::InvalidValue,
+            .message = "string UTF-8 byte length exceeds 32767",
+        });
+    }
+    auto rc = write_size32(w, s.size(), "string length");
+    if (!rc)
+        return std::unexpected(rc.error());
+
+    w.write_bytes(std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(s.data()), s.size()));
+    return {};
+}
+
+std::expected<std::string, Error> read_string_v18(ByteReader& r) {
+    auto len = r.read_varuint32();
+    if (!len)
+        return std::unexpected(len.error());
+
+    auto s = r.read_span(static_cast<std::size_t>(*len));
+    if (!s)
+        return std::unexpected(s.error());
+
+    return std::string(reinterpret_cast<const char *>(s->data()), s->size());
+}
+
+std::expected<uint8_t, Error> read_dict_key_desc(ByteReader& r, ByteArray *raw) {
+    auto b = r.read_u8();
+    if (!b)
+        return std::unexpected(b.error());
+    if (raw)
+        raw->push_back(*b);
+
+    switch (*b) {
+    case 0x00:
+    case TC_Boolean: // writer quirk: can emit, reader later rejects during dictionary body decode
+    case TC_Byte:
+    case TC_Int16:
+    case TC_Float:
+    case TC_Double:
+    case TC_String:
+    case TC_CompressedInt32:
+    case TC_CompressedInt64:
+        return *b;
+    default:
+        return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "invalid dictionary key descriptor"});
+    }
+}
+
+std::expected<TypeDesc, Error> read_dict_value_desc(ByteReader& r, ByteArray *raw);
+
+std::expected<DictHeaderDesc, Error> read_dict_header(ByteReader& r) {
+    DictHeaderDesc out;
+    auto key = read_dict_key_desc(r, &out.raw);
+    if (!key)
+        return std::unexpected(key.error());
+    out.key_code = *key;
+
+    auto value = read_dict_value_desc(r, &out.raw);
+    if (!value)
+        return std::unexpected(value.error());
+    out.value = std::move(*value);
+
+    return out;
+}
+
+inline bool type_desc_is_1d_array(TypeDesc::Kind k) {
+    switch (k) {
+    case TypeDesc::Kind::ObjectArray:
+    case TypeDesc::Kind::BooleanArray:
+    case TypeDesc::Kind::ByteArray:
+    case TypeDesc::Kind::ShortArray:
+    case TypeDesc::Kind::FloatArray:
+    case TypeDesc::Kind::DoubleArray:
+    case TypeDesc::Kind::StringArray:
+    case TypeDesc::Kind::IntArray:
+    case TypeDesc::Kind::LongArray:
+    case TypeDesc::Kind::HashtableArray:
+        return true;
+    default:
+        return false;
+    }
+}
+
+std::expected<TypeDesc, Error> read_dict_value_desc(ByteReader& r, ByteArray *raw) {
+    auto b = r.read_u8();
+    if (!b)
+        return std::unexpected(b.error());
+    if (raw)
+        raw->push_back(*b);
+
+    switch (*b) {
+    case 0x00:
+        return TypeDesc{.kind = TypeDesc::Kind::Object};
+    case TC_Boolean:
+        return TypeDesc{.kind = TypeDesc::Kind::Boolean};
+    case TC_Byte:
+        return TypeDesc{.kind = TypeDesc::Kind::Byte};
+    case TC_Int16:
+        return TypeDesc{.kind = TypeDesc::Kind::Short};
+    case TC_Float:
+        return TypeDesc{.kind = TypeDesc::Kind::Float};
+    case TC_Double:
+        return TypeDesc{.kind = TypeDesc::Kind::Double};
+    case TC_String:
+        return TypeDesc{.kind = TypeDesc::Kind::String};
+    case TC_CompressedInt32:
+        return TypeDesc{.kind = TypeDesc::Kind::Int};
+    case TC_CompressedInt64:
+        return TypeDesc{.kind = TypeDesc::Kind::Long};
+    case TC_Hashtable:
+        return TypeDesc{.kind = TypeDesc::Kind::Hashtable};
+    case TC_ObjectArray:
+        return TypeDesc{.kind = TypeDesc::Kind::ObjectArray};
+    case TC_BooleanArray:
+        return TypeDesc{.kind = TypeDesc::Kind::BooleanArray};
+    case TC_ByteArray:
+        return TypeDesc{.kind = TypeDesc::Kind::ByteArray};
+    case TC_Int16Array:
+        return TypeDesc{.kind = TypeDesc::Kind::ShortArray};
+    case TC_FloatArray:
+        return TypeDesc{.kind = TypeDesc::Kind::FloatArray};
+    case TC_DoubleArray:
+        return TypeDesc{.kind = TypeDesc::Kind::DoubleArray};
+    case TC_StringArray:
+        return TypeDesc{.kind = TypeDesc::Kind::StringArray};
+    case TC_CompressedInt32Array:
+        return TypeDesc{.kind = TypeDesc::Kind::IntArray};
+    case TC_CompressedInt64Array:
+        return TypeDesc{.kind = TypeDesc::Kind::LongArray};
+    case TC_HashtableArray:
+        return TypeDesc{.kind = TypeDesc::Kind::HashtableArray};
+
+    case TC_Dictionary: {
+        auto nested = read_dict_header(r);
+        if (!nested)
+            return std::unexpected(nested.error());
+        if (raw)
+            raw->insert(raw->end(), nested->raw.begin(), nested->raw.end());
+        return TypeDesc{
+            .kind = TypeDesc::Kind::Dictionary,
+            .dict = std::make_shared<DictHeaderDesc>(std::move(*nested)),
+        };
+    }
+
+    case TC_ArrayRecursive: {
+        auto child = read_dict_value_desc(r, raw);
+        if (!child)
+            return std::unexpected(child.error());
+        if (!(type_desc_is_1d_array(child->kind) || child->kind == TypeDesc::Kind::JaggedArray)) {
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "invalid jagged array descriptor"});
+        }
+        return TypeDesc{
+            .kind = TypeDesc::Kind::JaggedArray,
+            .element = std::make_shared<TypeDesc>(std::move(*child)),
+        };
+    }
+
+    default:
+        return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "invalid dictionary value descriptor"});
+    }
+}
+
+std::expected<DictHeaderDesc, Error> parse_dict_header_bytes(std::span<const uint8_t> bytes) {
+    ByteReader r(bytes);
+    auto hdr = read_dict_header(r);
+    if (!hdr)
+        return std::unexpected(hdr.error());
+    if (r.remaining() != 0) {
+        return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "dictionary header has trailing bytes"});
+    }
+    return hdr;
+}
+
+inline bool is_byte_object_dict_header(const DictHeaderDesc& hdr) { return hdr.raw.size() == 2 && hdr.raw[0] == TC_Byte && hdr.raw[1] == 0x00; }
+
+std::expected<void, Error> encode_debug_field_null_or_string(ByteWriter& w, const std::optional<std::string>& s) {
+    if (s.has_value() && !s->empty()) {
+        w.write_u8(TC_String);
+        return write_string_v18(w, *s);
+    }
+    w.write_u8(TC_Null);
+    return {};
+}
+
+// forward decls
+std::expected<void, Error> encode_payload_by_desc(ByteWriter& w, const GpBinaryV18& self, const TypeDesc& desc, const Value& v, int depth);
+std::expected<Value, Error> decode_payload_by_desc(ByteReader& r, const GpBinaryV18& self, const TypeDesc& desc, int depth);
+
+std::expected<void, Error> encode_hashtable_payload(ByteWriter& w, const GpBinaryV18& self, const HashtablePtr& ht, int depth) {
+    const std::size_t count = ht ? ht->size() : 0;
+    auto rc = write_size32(w, count, "hashtable entry count");
+    if (!rc)
+        return std::unexpected(rc.error());
+
+    if (!ht)
+        return {};
+
+    for (const auto& [k, v] : *ht) {
+        auto ek = self.encode_value(w, k, depth + 1);
+        if (!ek)
+            return std::unexpected(ek.error());
+        auto ev = self.encode_value(w, v, depth + 1);
+        if (!ev)
+            return std::unexpected(ev.error());
+    }
+    return {};
+}
+
+std::expected<HashtablePtr, Error> decode_hashtable_payload(ByteReader& r, const GpBinaryV18& self, int depth) {
+    auto count = r.read_varuint32();
+    if (!count)
+        return std::unexpected(count.error());
+
+    auto ht = std::make_shared<Hashtable>();
+    for (uint32_t i = 0; i < *count; ++i) {
+        auto k = self.decode_value(r, depth + 1);
+        if (!k)
+            return std::unexpected(k.error());
+        auto v = self.decode_value(r, depth + 1);
+        if (!v)
+            return std::unexpected(v.error());
+
+        if (!k->is_null())
+            ht->emplace(std::move(*k), std::move(*v));
+    }
+    return ht;
+}
+
+std::expected<void, Error> encode_object_array_payload(ByteWriter& w, const GpBinaryV18& self, const ObjectArray& a, int depth) {
+    auto rc = write_size32(w, a.size(), "object array count");
+    if (!rc)
+        return std::unexpected(rc.error());
+
+    for (const auto& e : a) {
+        auto enc = self.encode_value(w, e, depth + 1);
+        if (!enc)
+            return std::unexpected(enc.error());
+    }
+    return {};
+}
+
+std::expected<ObjectArray, Error> decode_object_array_payload(ByteReader& r, const GpBinaryV18& self, int depth) {
+    auto count = r.read_varuint32();
+    if (!count)
+        return std::unexpected(count.error());
+
+    ObjectArray out;
+    out.reserve(static_cast<std::size_t>(*count));
+    for (uint32_t i = 0; i < *count; ++i) {
+        auto v = self.decode_value(r, depth + 1);
+        if (!v)
+            return std::unexpected(v.error());
+        out.push_back(std::move(*v));
+    }
+    return out;
+}
+
+std::expected<void, Error> encode_jagged_array_payload(ByteWriter& w, const GpBinaryV18& self, const JaggedArray& a, int depth) {
+    auto rc = write_size32(w, a.elements.size(), "jagged array count");
+    if (!rc)
+        return std::unexpected(rc.error());
+
+    for (const auto& e : a.elements) {
+        if (!is_array_value(e)) {
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "jagged array element is not an array value"});
+        }
+        auto enc = self.encode_value(w, e, depth + 1);
+        if (!enc)
+            return std::unexpected(enc.error());
+    }
+    return {};
+}
+
+std::expected<JaggedArray, Error> decode_jagged_array_payload(ByteReader& r, const GpBinaryV18& self, int depth) {
+    auto count = r.read_varuint32();
+    if (!count)
+        return std::unexpected(count.error());
+
+    JaggedArray out;
+    out.elements.reserve(static_cast<std::size_t>(*count));
+    for (uint32_t i = 0; i < *count; ++i) {
+        auto v = self.decode_value(r, depth + 1);
+        if (!v)
+            return std::unexpected(v.error());
+        out.elements.push_back(std::move(*v));
+    }
+    return out;
+}
+
+std::expected<void, Error> encode_hashtable_array_payload(ByteWriter& w, const GpBinaryV18& self, const std::vector<HashtablePtr>& a, int depth) {
+    auto rc = write_size32(w, a.size(), "hashtable array count");
+    if (!rc)
+        return std::unexpected(rc.error());
+
+    for (const auto& ht : a) {
+        auto eh = encode_hashtable_payload(w, self, ht, depth + 1);
+        if (!eh)
+            return std::unexpected(eh.error());
+    }
+    return {};
+}
+
+std::expected<std::vector<HashtablePtr>, Error> decode_hashtable_array_payload(ByteReader& r, const GpBinaryV18& self, int depth) {
+    auto count = r.read_varuint32();
+    if (!count)
+        return std::unexpected(count.error());
+
+    std::vector<HashtablePtr> out;
+    out.reserve(static_cast<std::size_t>(*count));
+    for (uint32_t i = 0; i < *count; ++i) {
+        auto ht = decode_hashtable_payload(r, self, depth + 1);
+        if (!ht)
+            return std::unexpected(ht.error());
+        out.push_back(std::move(*ht));
+    }
+    return out;
+}
+
+std::expected<void, Error> encode_key_payload(ByteWriter& w, const GpBinaryV18& self, uint8_t key_desc, const Value& key, int depth) {
+    switch (key_desc) {
+    case 0x00:
+        return self.encode_value(w, key, depth + 1);
+
+    case TC_Boolean:
+        if (!key.is<bool>())
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "dictionary key is not bool"});
+        w.write_u8(key.get<bool>() ? 1 : 0);
+        return {};
+
+    case TC_Byte:
+        if (!key.is<uint8_t>())
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "dictionary key is not byte"});
+        w.write_u8(key.get<uint8_t>());
+        return {};
+
+    case TC_Int16:
+        if (!key.is<int16_t>())
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "dictionary key is not short"});
+        w.write_i16_le(key.get<int16_t>());
+        return {};
+
+    case TC_Float:
+        if (!key.is<float>())
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "dictionary key is not float"});
+        w.write_f32_le(key.get<float>());
+        return {};
+
+    case TC_Double:
+        if (!key.is<double>())
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "dictionary key is not double"});
+        w.write_f64_le(key.get<double>());
+        return {};
+
+    case TC_String:
+        if (!key.is<std::string>())
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "dictionary key is not string"});
+        return write_string_v18(w, key.get<std::string>());
+
+    case TC_CompressedInt32:
+        if (!key.is<int32_t>())
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "dictionary key is not int"});
+        w.write_varuint32(static_cast<uint32_t>(zigzag_encode_32(key.get<int32_t>())));
+        return {};
+
+    case TC_CompressedInt64:
+        if (!key.is<int64_t>())
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "dictionary key is not long"});
+        w.write_varuint64(zigzag_encode_64(key.get<int64_t>()));
+        return {};
+
+    default:
+        return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "unsupported dictionary key descriptor"});
+    }
+}
+
+std::expected<Value, Error> decode_key_payload(ByteReader& r, const GpBinaryV18& self, uint8_t key_desc, int depth) {
+    switch (key_desc) {
+    case 0x00:
+        return self.decode_value(r, depth + 1);
+
+    case TC_Byte: {
+        auto v = r.read_u8();
+        if (!v)
+            return std::unexpected(v.error());
+        return Value(*v);
+    }
+
+    case TC_Int16: {
+        auto v = r.read_i16_le();
+        if (!v)
+            return std::unexpected(v.error());
+        return Value(*v);
+    }
+
+    case TC_Float: {
+        auto v = r.read_f32_le();
+        if (!v)
+            return std::unexpected(v.error());
+        return Value(*v);
+    }
+
+    case TC_Double: {
+        auto v = r.read_f64_le();
+        if (!v)
+            return std::unexpected(v.error());
+        return Value(*v);
+    }
+
+    case TC_String: {
+        auto s = read_string_v18(r);
+        if (!s)
+            return std::unexpected(s.error());
+        return Value(std::move(*s));
+    }
+
+    case TC_CompressedInt32: {
+        auto u = r.read_varuint32();
+        if (!u)
+            return std::unexpected(u.error());
+        return Value(zigzag_decode_32(*u));
+    }
+
+    case TC_CompressedInt64: {
+        auto u = r.read_varuint64();
+        if (!u)
+            return std::unexpected(u.error());
+        return Value(zigzag_decode_64(*u));
+    }
+
+    case TC_Boolean:
+        return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "bool dictionary keys are rejected by V18 reader"});
+
+    default:
+        return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "unsupported dictionary key descriptor"});
+    }
+}
+
+std::expected<void, Error> encode_generic_dictionary_payload(ByteWriter& w, const GpBinaryV18& self, const DictHeaderDesc& hdr, const GenericDictionary& gd,
+                                                             int depth) {
+    if (gd.header != hdr.raw) {
+        return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "generic dictionary header mismatch"});
+    }
+
+    auto rc = write_size32(w, gd.entries.size(), "dictionary entry count");
+    if (!rc)
+        return std::unexpected(rc.error());
+
+    for (const auto& [k, v] : gd.entries) {
+        auto ek = encode_key_payload(w, self, hdr.key_code, k, depth + 1);
+        if (!ek)
+            return std::unexpected(ek.error());
+
+        auto ev = encode_payload_by_desc(w, self, hdr.value, v, depth + 1);
+        if (!ev)
+            return std::unexpected(ev.error());
+    }
+
+    return {};
+}
+
+std::expected<GenericDictionary, Error> decode_generic_dictionary_payload(ByteReader& r, const GpBinaryV18& self, const DictHeaderDesc& hdr, int depth) {
+    if (hdr.key_code == TC_Boolean) {
+        return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "bool dictionary keys are rejected by V18 reader"});
+    }
+
+    auto count = r.read_varuint32();
+    if (!count)
+        return std::unexpected(count.error());
+
+    GenericDictionary out;
+    out.header = hdr.raw;
+    out.entries.reserve(static_cast<std::size_t>(*count));
+
+    for (uint32_t i = 0; i < *count; ++i) {
+        auto k = decode_key_payload(r, self, hdr.key_code, depth + 1);
+        if (!k)
+            return std::unexpected(k.error());
+
+        auto v = decode_payload_by_desc(r, self, hdr.value, depth + 1);
+        if (!v)
+            return std::unexpected(v.error());
+
+        out.entries.emplace_back(std::move(*k), std::move(*v));
+    }
+
+    return out;
+}
+
+std::expected<void, Error> encode_convenience_dictionary_payload(ByteWriter& w, const GpBinaryV18& self, const Dictionary& d, int depth) {
+    auto rc = write_size32(w, d.size(), "dictionary entry count");
+    if (!rc)
+        return std::unexpected(rc.error());
+
+    for (const auto& [k, v] : d) {
+        w.write_u8(k);
+        auto ev = self.encode_value(w, v, depth + 1);
+        if (!ev)
+            return std::unexpected(ev.error());
+    }
+
+    return {};
+}
+
+std::expected<Dictionary, Error> decode_convenience_dictionary_payload(ByteReader& r, const GpBinaryV18& self, int depth) {
+    auto count = r.read_varuint32();
+    if (!count)
+        return std::unexpected(count.error());
+
+    Dictionary out;
+    out.reserve(static_cast<std::size_t>(*count));
+
+    for (uint32_t i = 0; i < *count; ++i) {
+        auto k = r.read_u8();
+        if (!k)
+            return std::unexpected(k.error());
+
+        auto v = self.decode_value(r, depth + 1);
+        if (!v)
+            return std::unexpected(v.error());
+
+        out[*k] = std::move(*v);
+    }
+
+    return out;
+}
+
+std::expected<Value, Error> decode_dictionary_payload_as_value(ByteReader& r, const GpBinaryV18& self, const DictHeaderDesc& hdr, int depth) {
+    if (is_byte_object_dict_header(hdr)) {
+        auto d = decode_convenience_dictionary_payload(r, self, depth + 1);
+        if (!d)
+            return std::unexpected(d.error());
+        return Value(std::move(*d));
+    }
+
+    auto gd = decode_generic_dictionary_payload(r, self, hdr, depth + 1);
+    if (!gd)
+        return std::unexpected(gd.error());
+    return Value(std::move(*gd));
+}
+
+std::expected<void, Error> encode_payload_by_desc(ByteWriter& w, const GpBinaryV18& self, const TypeDesc& desc, const Value& v, int depth) {
+    switch (desc.kind) {
+    case TypeDesc::Kind::Object:
+        return self.encode_value(w, v, depth + 1);
+
+    case TypeDesc::Kind::Boolean:
+        if (!v.is<bool>())
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "value is not bool"});
+        w.write_u8(v.get<bool>() ? 1 : 0);
+        return {};
+
+    case TypeDesc::Kind::Byte:
+        if (!v.is<uint8_t>())
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "value is not byte"});
+        w.write_u8(v.get<uint8_t>());
+        return {};
+
+    case TypeDesc::Kind::Short:
+        if (!v.is<int16_t>())
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "value is not short"});
+        w.write_i16_le(v.get<int16_t>());
+        return {};
+
+    case TypeDesc::Kind::Float:
+        if (!v.is<float>())
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "value is not float"});
+        w.write_f32_le(v.get<float>());
+        return {};
+
+    case TypeDesc::Kind::Double:
+        if (!v.is<double>())
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "value is not double"});
+        w.write_f64_le(v.get<double>());
+        return {};
+
+    case TypeDesc::Kind::String:
+        if (!v.is<std::string>())
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "value is not string"});
+        return write_string_v18(w, v.get<std::string>());
+
+    case TypeDesc::Kind::Int:
+        if (!v.is<int32_t>())
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "value is not int"});
+        w.write_varuint32(static_cast<uint32_t>(zigzag_encode_32(v.get<int32_t>())));
+        return {};
+
+    case TypeDesc::Kind::Long:
+        if (!v.is<int64_t>())
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "value is not long"});
+        w.write_varuint64(zigzag_encode_64(v.get<int64_t>()));
+        return {};
+
+    case TypeDesc::Kind::Hashtable:
+        if (!v.is<HashtablePtr>())
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "value is not hashtable"});
+        return encode_hashtable_payload(w, self, v.get<HashtablePtr>(), depth + 1);
+
+    case TypeDesc::Kind::Dictionary:
+        if (!desc.dict)
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "missing dictionary descriptor"});
+        if (v.is<Dictionary>()) {
+            if (!is_byte_object_dict_header(*desc.dict)) {
+                return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "convenience Dictionary only matches Dictionary<byte,object>"});
+            }
+            return encode_convenience_dictionary_payload(w, self, v.get<Dictionary>(), depth + 1);
+        }
+        if (!v.is<GenericDictionary>())
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "value is not generic dictionary"});
+        return encode_generic_dictionary_payload(w, self, *desc.dict, v.get<GenericDictionary>(), depth + 1);
+
+    case TypeDesc::Kind::ObjectArray:
+        if (!v.is<ObjectArray>())
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "value is not object array"});
+        return encode_object_array_payload(w, self, v.get<ObjectArray>(), depth + 1);
+
+    case TypeDesc::Kind::BooleanArray: {
+        if (!v.is<std::vector<bool>>())
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "value is not bool array"});
+        const auto& a = v.get<std::vector<bool>>();
+        auto rc = write_size32(w, a.size(), "bool array count");
+        if (!rc)
+            return std::unexpected(rc.error());
+        const std::size_t nbytes = (a.size() + 7) / 8;
+        for (std::size_t bi = 0; bi < nbytes; ++bi) {
+            uint8_t b = 0;
+            for (int bit = 0; bit < 8; ++bit) {
+                const std::size_t idx = bi * 8 + static_cast<std::size_t>(bit);
+                if (idx >= a.size())
+                    break;
+                if (a[idx])
+                    b |= static_cast<uint8_t>(1u << bit);
+            }
+            w.write_u8(b);
+        }
+        return {};
+    }
+
+    case TypeDesc::Kind::ByteArray: {
+        if (!v.is<ByteArray>())
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "value is not byte array"});
+        const auto& a = v.get<ByteArray>();
+        auto rc = write_size32(w, a.size(), "byte array length");
+        if (!rc)
+            return std::unexpected(rc.error());
+        w.write_bytes(a);
+        return {};
+    }
+
+    case TypeDesc::Kind::ShortArray: {
+        if (!v.is<std::vector<int16_t>>())
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "value is not short array"});
+        const auto& a = v.get<std::vector<int16_t>>();
+        auto rc = write_size32(w, a.size(), "short array count");
+        if (!rc)
+            return std::unexpected(rc.error());
+        for (int16_t x : a)
+            w.write_i16_le(x);
+        return {};
+    }
+
+    case TypeDesc::Kind::FloatArray: {
+        if (!v.is<std::vector<float>>())
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "value is not float array"});
+        const auto& a = v.get<std::vector<float>>();
+        auto rc = write_size32(w, a.size(), "float array count");
+        if (!rc)
+            return std::unexpected(rc.error());
+        for (float x : a)
+            w.write_f32_le(x);
+        return {};
+    }
+
+    case TypeDesc::Kind::DoubleArray: {
+        if (!v.is<std::vector<double>>())
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "value is not double array"});
+        const auto& a = v.get<std::vector<double>>();
+        auto rc = write_size32(w, a.size(), "double array count");
+        if (!rc)
+            return std::unexpected(rc.error());
+        for (double x : a)
+            w.write_f64_le(x);
+        return {};
+    }
+
+    case TypeDesc::Kind::StringArray: {
+        if (!v.is<std::vector<std::string>>())
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "value is not string array"});
+        const auto& a = v.get<std::vector<std::string>>();
+        auto rc = write_size32(w, a.size(), "string array count");
+        if (!rc)
+            return std::unexpected(rc.error());
+        for (const auto& s : a) {
+            auto rs = write_string_v18(w, s);
+            if (!rs)
+                return std::unexpected(rs.error());
+        }
+        return {};
+    }
+
+    case TypeDesc::Kind::IntArray: {
+        if (!v.is<std::vector<int32_t>>())
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "value is not int array"});
+        const auto& a = v.get<std::vector<int32_t>>();
+        auto rc = write_size32(w, a.size(), "int array count");
+        if (!rc)
+            return std::unexpected(rc.error());
+        for (int32_t x : a)
+            w.write_varuint32(static_cast<uint32_t>(zigzag_encode_32(x)));
+        return {};
+    }
+
+    case TypeDesc::Kind::LongArray: {
+        if (!v.is<std::vector<int64_t>>())
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "value is not long array"});
+        const auto& a = v.get<std::vector<int64_t>>();
+        auto rc = write_size32(w, a.size(), "long array count");
+        if (!rc)
+            return std::unexpected(rc.error());
+        for (int64_t x : a)
+            w.write_varuint64(zigzag_encode_64(x));
+        return {};
+    }
+
+    case TypeDesc::Kind::HashtableArray:
+        if (!v.is<std::vector<HashtablePtr>>())
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "value is not hashtable array"});
+        return encode_hashtable_array_payload(w, self, v.get<std::vector<HashtablePtr>>(), depth + 1);
+
+    case TypeDesc::Kind::JaggedArray:
+        if (!v.is<JaggedArray>())
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "value is not jagged array"});
+        return encode_jagged_array_payload(w, self, v.get<JaggedArray>(), depth + 1);
+    }
+
+    return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "unsupported payload descriptor"});
+}
+
+std::expected<Value, Error> decode_payload_by_desc(ByteReader& r, const GpBinaryV18& self, const TypeDesc& desc, int depth) {
+    switch (desc.kind) {
+    case TypeDesc::Kind::Object:
+        return self.decode_value(r, depth + 1);
+
+    case TypeDesc::Kind::Boolean: {
+        auto b = r.read_u8();
+        if (!b)
+            return std::unexpected(b.error());
+        return Value(*b != 0);
+    }
+
+    case TypeDesc::Kind::Byte: {
+        auto b = r.read_u8();
+        if (!b)
+            return std::unexpected(b.error());
+        return Value(*b);
+    }
+
+    case TypeDesc::Kind::Short: {
+        auto v = r.read_i16_le();
+        if (!v)
+            return std::unexpected(v.error());
+        return Value(*v);
+    }
+
+    case TypeDesc::Kind::Float: {
+        auto v = r.read_f32_le();
+        if (!v)
+            return std::unexpected(v.error());
+        return Value(*v);
+    }
+
+    case TypeDesc::Kind::Double: {
+        auto v = r.read_f64_le();
+        if (!v)
+            return std::unexpected(v.error());
+        return Value(*v);
+    }
+
+    case TypeDesc::Kind::String: {
+        auto s = read_string_v18(r);
+        if (!s)
+            return std::unexpected(s.error());
+        return Value(std::move(*s));
+    }
+
+    case TypeDesc::Kind::Int: {
+        auto u = r.read_varuint32();
+        if (!u)
+            return std::unexpected(u.error());
+        return Value(zigzag_decode_32(*u));
+    }
+
+    case TypeDesc::Kind::Long: {
+        auto u = r.read_varuint64();
+        if (!u)
+            return std::unexpected(u.error());
+        return Value(zigzag_decode_64(*u));
+    }
+
+    case TypeDesc::Kind::Hashtable: {
+        auto ht = decode_hashtable_payload(r, self, depth + 1);
+        if (!ht)
+            return std::unexpected(ht.error());
+        return Value(std::move(*ht));
+    }
+
+    case TypeDesc::Kind::Dictionary:
+        if (!desc.dict)
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "missing dictionary descriptor"});
+        return decode_dictionary_payload_as_value(r, self, *desc.dict, depth + 1);
+
+    case TypeDesc::Kind::ObjectArray: {
+        auto a = decode_object_array_payload(r, self, depth + 1);
+        if (!a)
+            return std::unexpected(a.error());
+        return Value(std::move(*a));
+    }
+
+    case TypeDesc::Kind::BooleanArray: {
+        auto count = r.read_varuint32();
+        if (!count)
+            return std::unexpected(count.error());
+        std::vector<bool> out;
+        out.resize(static_cast<std::size_t>(*count));
+
+        auto raw = r.read_span((static_cast<std::size_t>(*count) + 7) / 8);
+        if (!raw)
+            return std::unexpected(raw.error());
+
+        for (std::size_t i = 0; i < out.size(); ++i)
+            out[i] = (((*raw)[i / 8] >> (i % 8)) & 1u) != 0;
+
+        return Value(std::move(out));
+    }
+
+    case TypeDesc::Kind::ByteArray: {
+        auto len = r.read_varuint32();
+        if (!len)
+            return std::unexpected(len.error());
+        auto s = r.read_span(static_cast<std::size_t>(*len));
+        if (!s)
+            return std::unexpected(s.error());
+        return Value(ByteArray(s->begin(), s->end()));
+    }
+
+    case TypeDesc::Kind::ShortArray: {
+        auto count = r.read_varuint32();
+        if (!count)
+            return std::unexpected(count.error());
+        std::vector<int16_t> out;
+        out.reserve(static_cast<std::size_t>(*count));
+        for (uint32_t i = 0; i < *count; ++i) {
+            auto v = r.read_i16_le();
+            if (!v)
+                return std::unexpected(v.error());
+            out.push_back(*v);
+        }
+        return Value(std::move(out));
+    }
+
+    case TypeDesc::Kind::FloatArray: {
+        auto count = r.read_varuint32();
+        if (!count)
+            return std::unexpected(count.error());
+        std::vector<float> out;
+        out.reserve(static_cast<std::size_t>(*count));
+        for (uint32_t i = 0; i < *count; ++i) {
+            auto v = r.read_f32_le();
+            if (!v)
+                return std::unexpected(v.error());
+            out.push_back(*v);
+        }
+        return Value(std::move(out));
+    }
+
+    case TypeDesc::Kind::DoubleArray: {
+        auto count = r.read_varuint32();
+        if (!count)
+            return std::unexpected(count.error());
+        std::vector<double> out;
+        out.reserve(static_cast<std::size_t>(*count));
+        for (uint32_t i = 0; i < *count; ++i) {
+            auto v = r.read_f64_le();
+            if (!v)
+                return std::unexpected(v.error());
+            out.push_back(*v);
+        }
+        return Value(std::move(out));
+    }
+
+    case TypeDesc::Kind::StringArray: {
+        auto count = r.read_varuint32();
+        if (!count)
+            return std::unexpected(count.error());
+        std::vector<std::string> out;
+        out.reserve(static_cast<std::size_t>(*count));
+        for (uint32_t i = 0; i < *count; ++i) {
+            auto s = read_string_v18(r);
+            if (!s)
+                return std::unexpected(s.error());
+            out.push_back(std::move(*s));
+        }
+        return Value(std::move(out));
+    }
+
+    case TypeDesc::Kind::IntArray: {
+        auto count = r.read_varuint32();
+        if (!count)
+            return std::unexpected(count.error());
+        std::vector<int32_t> out;
+        out.reserve(static_cast<std::size_t>(*count));
+        for (uint32_t i = 0; i < *count; ++i) {
+            auto u = r.read_varuint32();
+            if (!u)
+                return std::unexpected(u.error());
+            out.push_back(zigzag_decode_32(*u));
+        }
+        return Value(std::move(out));
+    }
+
+    case TypeDesc::Kind::LongArray: {
+        auto count = r.read_varuint32();
+        if (!count)
+            return std::unexpected(count.error());
+        std::vector<int64_t> out;
+        out.reserve(static_cast<std::size_t>(*count));
+        for (uint32_t i = 0; i < *count; ++i) {
+            auto u = r.read_varuint64();
+            if (!u)
+                return std::unexpected(u.error());
+            out.push_back(zigzag_decode_64(*u));
+        }
+        return Value(std::move(out));
+    }
+
+    case TypeDesc::Kind::HashtableArray: {
+        auto a = decode_hashtable_array_payload(r, self, depth + 1);
+        if (!a)
+            return std::unexpected(a.error());
+        return Value(std::move(*a));
+    }
+
+    case TypeDesc::Kind::JaggedArray: {
+        auto a = decode_jagged_array_payload(r, self, depth + 1);
+        if (!a)
+            return std::unexpected(a.error());
+        return Value(std::move(*a));
+    }
+    }
+
+    return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "unsupported payload descriptor"});
+}
+
+} // namespace
 
 // -------------------- Parameters --------------------
 
@@ -89,11 +1108,10 @@ std::expected<ParameterList, Error> GpBinaryV18::decode_parameters(ByteReader& r
     if (!cnt_b)
         return std::unexpected(cnt_b.error());
 
-    uint8_t cnt = *cnt_b;
     ParameterList out;
-    out.reserve(cnt);
+    out.reserve(*cnt_b);
 
-    for (uint32_t i = 0; i < cnt; ++i) {
+    for (uint32_t i = 0; i < *cnt_b; ++i) {
         auto key = r.read_u8();
         if (!key)
             return std::unexpected(key.error());
@@ -146,20 +1164,30 @@ std::expected<void, Error> GpBinaryV18::encode_value(ByteWriter& w, const Value&
                     return {};
                 }
 
-                int64_t mag64 = std::llabs(static_cast<long long>(a));
-                if (mag64 <= 255) {
-                    w.write_u8(a >= 0 ? TC_Int1_Pos : TC_Int1_Neg);
-                    w.write_u8(static_cast<uint8_t>(mag64));
+                const int64_t mag = (a < 0) ? -static_cast<int64_t>(a) : static_cast<int64_t>(a);
+                if (a > 0 && mag <= 255) {
+                    w.write_u8(TC_Int1_Pos);
+                    w.write_u8(static_cast<uint8_t>(mag));
                     return {};
                 }
-                if (mag64 <= 65535) {
-                    w.write_u8(a >= 0 ? TC_Int2_Pos : TC_Int2_Neg);
-                    w.write_u16_le(static_cast<uint16_t>(mag64));
+                if (a < 0 && mag <= 255) {
+                    w.write_u8(TC_Int1_Neg);
+                    w.write_u8(static_cast<uint8_t>(mag));
+                    return {};
+                }
+                if (a > 0 && mag <= 65535) {
+                    w.write_u8(TC_Int2_Pos);
+                    w.write_u16_le(static_cast<uint16_t>(mag));
+                    return {};
+                }
+                if (a < 0 && mag <= 65535) {
+                    w.write_u8(TC_Int2_Neg);
+                    w.write_u16_le(static_cast<uint16_t>(mag));
                     return {};
                 }
 
                 w.write_u8(TC_CompressedInt32);
-                w.write_varuint(zigzag_encode_32(a));
+                w.write_varuint32(static_cast<uint32_t>(zigzag_encode_32(a)));
                 return {};
             } else if constexpr (std::is_same_v<T, int64_t>) {
                 if (a == 0) {
@@ -167,153 +1195,206 @@ std::expected<void, Error> GpBinaryV18::encode_value(ByteWriter& w, const Value&
                     return {};
                 }
 
-                uint64_t ua = static_cast<uint64_t>(a);
-                uint64_t mag = (a < 0) ? (uint64_t{0} - ua) : ua;
+                const uint64_t ua = static_cast<uint64_t>(a);
+                const uint64_t mag = (a < 0) ? (uint64_t{0} - ua) : ua;
 
-                if (mag <= 255) {
-                    w.write_u8(a >= 0 ? TC_L1_Pos : TC_L1_Neg);
+                if (a > 0 && mag <= 255) {
+                    w.write_u8(TC_L1_Pos);
                     w.write_u8(static_cast<uint8_t>(mag));
                     return {};
                 }
-                if (mag <= 65535) {
-                    w.write_u8(a >= 0 ? TC_L2_Pos : TC_L2_Neg);
+                if (a < 0 && mag <= 255) {
+                    w.write_u8(TC_L1_Neg);
+                    w.write_u8(static_cast<uint8_t>(mag));
+                    return {};
+                }
+                if (a > 0 && mag <= 65535) {
+                    w.write_u8(TC_L2_Pos);
+                    w.write_u16_le(static_cast<uint16_t>(mag));
+                    return {};
+                }
+                if (a < 0 && mag <= 65535) {
+                    w.write_u8(TC_L2_Neg);
                     w.write_u16_le(static_cast<uint16_t>(mag));
                     return {};
                 }
 
                 w.write_u8(TC_CompressedInt64);
-                w.write_varuint(zigzag_encode_64(a));
+                w.write_varuint64(zigzag_encode_64(a));
                 return {};
             } else if constexpr (std::is_same_v<T, float>) {
-                // Preserve -0.0f
-                if (f32_is_pos_zero(a)) {
-                    w.write_u8(TC_FloatZero);
-                    return {};
-                }
                 w.write_u8(TC_Float);
                 w.write_f32_le(a);
                 return {};
             } else if constexpr (std::is_same_v<T, double>) {
-                // Preserve -0.0. Only +0.0 uses the compact zero code
-                if (f64_is_pos_zero(a)) {
-                    w.write_u8(TC_DoubleZero);
-                    return {};
-                }
                 w.write_u8(TC_Double);
                 w.write_f64_le(a);
                 return {};
             } else if constexpr (std::is_same_v<T, std::string>) {
                 w.write_u8(TC_String);
-                w.write_string(a);
-                return {};
+                return write_string_v18(w, a);
             } else if constexpr (std::is_same_v<T, ByteArray>) {
                 w.write_u8(TC_ByteArray);
-                w.write_varuint(a.size());
+                auto rc = write_size32(w, a.size(), "byte array length");
+                if (!rc)
+                    return std::unexpected(rc.error());
                 w.write_bytes(a);
                 return {};
             } else if constexpr (std::is_same_v<T, std::vector<bool>>) {
                 w.write_u8(TC_BooleanArray);
-                w.write_varuint(a.size());
-
-                std::size_t nbytes = (a.size() + 7) / 8;
-                for (std::size_t bi = 0; bi < nbytes; ++bi) {
-                    uint8_t byte = 0;
-                    for (int bit = 0; bit < 8; ++bit) {
-                        std::size_t idx = bi * 8 + static_cast<std::size_t>(bit);
-                        if (idx >= a.size())
-                            break;
-                        if (a[idx])
-                            byte |= static_cast<uint8_t>(1u << bit);
-                    }
-                    w.write_u8(byte);
-                }
-                return {};
+                TypeDesc desc{.kind = TypeDesc::Kind::BooleanArray};
+                return encode_payload_by_desc(w, *this, desc, Value(a), depth);
             } else if constexpr (std::is_same_v<T, std::vector<int16_t>>) {
                 w.write_u8(TC_Int16Array);
-                w.write_varuint(a.size());
-                for (int16_t x : a)
-                    w.write_i16_le(x);
-                return {};
+                TypeDesc desc{.kind = TypeDesc::Kind::ShortArray};
+                return encode_payload_by_desc(w, *this, desc, Value(a), depth);
             } else if constexpr (std::is_same_v<T, std::vector<int32_t>>) {
                 w.write_u8(TC_CompressedInt32Array);
-                w.write_varuint(a.size());
-                for (int32_t x : a)
-                    w.write_varuint(zigzag_encode_32(x));
-                return {};
+                TypeDesc desc{.kind = TypeDesc::Kind::IntArray};
+                return encode_payload_by_desc(w, *this, desc, Value(a), depth);
             } else if constexpr (std::is_same_v<T, std::vector<int64_t>>) {
                 w.write_u8(TC_CompressedInt64Array);
-                w.write_varuint(a.size());
-                for (int64_t x : a)
-                    w.write_varuint(zigzag_encode_64(x));
-                return {};
+                TypeDesc desc{.kind = TypeDesc::Kind::LongArray};
+                return encode_payload_by_desc(w, *this, desc, Value(a), depth);
             } else if constexpr (std::is_same_v<T, std::vector<float>>) {
                 w.write_u8(TC_FloatArray);
-                w.write_varuint(a.size());
-                for (float x : a)
-                    w.write_f32_le(x);
-                return {};
+                TypeDesc desc{.kind = TypeDesc::Kind::FloatArray};
+                return encode_payload_by_desc(w, *this, desc, Value(a), depth);
             } else if constexpr (std::is_same_v<T, std::vector<double>>) {
                 w.write_u8(TC_DoubleArray);
-                w.write_varuint(a.size());
-                for (double x : a)
-                    w.write_f64_le(x);
-                return {};
+                TypeDesc desc{.kind = TypeDesc::Kind::DoubleArray};
+                return encode_payload_by_desc(w, *this, desc, Value(a), depth);
             } else if constexpr (std::is_same_v<T, std::vector<std::string>>) {
                 w.write_u8(TC_StringArray);
-                w.write_varuint(a.size());
-                for (const auto& s : a)
-                    w.write_string(s);
-                return {};
+                TypeDesc desc{.kind = TypeDesc::Kind::StringArray};
+                return encode_payload_by_desc(w, *this, desc, Value(a), depth);
             } else if constexpr (std::is_same_v<T, ObjectArray>) {
                 w.write_u8(TC_ObjectArray);
-                w.write_varuint(a.size());
-                for (const auto& e : a) {
-                    auto enc = encode_value(w, e, depth + 1);
-                    if (!enc)
-                        return std::unexpected(enc.error());
-                }
-                return {};
+                return encode_object_array_payload(w, *this, a, depth);
+            } else if constexpr (std::is_same_v<T, JaggedArray>) {
+                w.write_u8(TC_ArrayRecursive);
+                return encode_jagged_array_payload(w, *this, a, depth);
             } else if constexpr (std::is_same_v<T, Dictionary>) {
                 w.write_u8(TC_Dictionary);
-                w.write_u8(TC_Byte); // key-type byte (preserved for compatibility)
-                w.write_u8(0x00);    // value-type "unknown/0"
-                w.write_varuint(a.size());
-                for (const auto& [k, val] : a) {
-                    w.write_u8(k);
-                    auto enc = encode_value(w, val, depth + 1);
-                    if (!enc)
-                        return std::unexpected(enc.error());
-                }
-                return {};
-            } else if constexpr (std::is_same_v<T, std::shared_ptr<Hashtable>>) {
-                w.write_u8(TC_Hashtable);
-                if (!a) {
-                    w.write_varuint(0);
-                    return {};
-                }
+                w.write_u8(TC_Byte);
+                w.write_u8(0x00);
+                return encode_convenience_dictionary_payload(w, *this, a, depth);
+            } else if constexpr (std::is_same_v<T, GenericDictionary>) {
+                auto hdr = parse_dict_header_bytes(a.header);
+                if (!hdr)
+                    return std::unexpected(hdr.error());
 
-                w.write_varuint(a->size());
-                for (const auto& [k, val] : *a) {
-                    auto ek = encode_value(w, k, depth + 1);
-                    if (!ek)
-                        return std::unexpected(ek.error());
-                    auto ev = encode_value(w, val, depth + 1);
-                    if (!ev)
-                        return std::unexpected(ev.error());
-                }
-                return {};
+                w.write_u8(TC_Dictionary);
+                w.write_bytes(a.header);
+                return encode_generic_dictionary_payload(w, *this, *hdr, a, depth);
+            } else if constexpr (std::is_same_v<T, HashtablePtr>) {
+                w.write_u8(TC_Hashtable);
+                return encode_hashtable_payload(w, *this, a, depth);
             } else if constexpr (std::is_same_v<T, RawCustomValue>) {
                 if (a.custom_code < 100) {
                     w.write_u8(static_cast<uint8_t>(128 + a.custom_code));
-                    w.write_varuint(a.data.size());
+                    auto rc = write_size32(w, a.data.size(), "custom payload length");
+                    if (!rc)
+                        return std::unexpected(rc.error());
                     w.write_bytes(a.data);
                     return {};
                 }
 
                 w.write_u8(TC_Custom_Explicit);
                 w.write_u8(a.custom_code);
-                w.write_varuint(a.data.size());
+                auto rc = write_size32(w, a.data.size(), "custom payload length");
+                if (!rc)
+                    return std::unexpected(rc.error());
                 w.write_bytes(a.data);
+                return {};
+            } else if constexpr (std::is_same_v<T, EventMessage>) {
+                w.write_u8(TC_EventData);
+                w.write_u8(a.event_code);
+                return encode_parameters(w, a.parameters, depth + 1);
+            } else if constexpr (std::is_same_v<T, OperationRequestMessage>) {
+                w.write_u8(TC_OperationRequest);
+                w.write_u8(a.operation_code);
+                return encode_parameters(w, a.parameters, depth + 1);
+            } else if constexpr (std::is_same_v<T, OperationResponseMessage>) {
+                w.write_u8(TC_OperationResponse);
+                w.write_u8(a.operation_code);
+                w.write_i16_le(a.return_code);
+
+                auto dbg = encode_debug_field_null_or_string(w, a.debug_message);
+                if (!dbg)
+                    return std::unexpected(dbg.error());
+
+                return encode_parameters(w, a.parameters, depth + 1);
+            } else if constexpr (std::is_same_v<T, std::vector<Dictionary>>) {
+                w.write_u8(TC_DictionaryArray);
+                w.write_u8(TC_Byte);
+                w.write_u8(0x00);
+
+                auto rc = write_size32(w, a.size(), "dictionary array count");
+                if (!rc)
+                    return std::unexpected(rc.error());
+
+                for (const auto& d : a) {
+                    auto ed = encode_convenience_dictionary_payload(w, *this, d, depth + 1);
+                    if (!ed)
+                        return std::unexpected(ed.error());
+                }
+                return {};
+            } else if constexpr (std::is_same_v<T, std::vector<GenericDictionary>>) {
+                if (a.empty()) {
+                    return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "cannot encode empty generic dictionary array without header"});
+                }
+
+                auto hdr = parse_dict_header_bytes(a.front().header);
+                if (!hdr)
+                    return std::unexpected(hdr.error());
+
+                for (const auto& d : a) {
+                    if (d.header != a.front().header) {
+                        return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "dictionary array contains mismatched headers"});
+                    }
+                }
+
+                w.write_u8(TC_DictionaryArray);
+                w.write_bytes(a.front().header);
+
+                auto rc = write_size32(w, a.size(), "dictionary array count");
+                if (!rc)
+                    return std::unexpected(rc.error());
+
+                for (const auto& d : a) {
+                    auto ed = encode_generic_dictionary_payload(w, *this, *hdr, d, depth + 1);
+                    if (!ed)
+                        return std::unexpected(ed.error());
+                }
+                return {};
+            } else if constexpr (std::is_same_v<T, std::vector<HashtablePtr>>) {
+                w.write_u8(TC_HashtableArray);
+                return encode_hashtable_array_payload(w, *this, a, depth);
+            } else if constexpr (std::is_same_v<T, std::vector<RawCustomValue>>) {
+                if (a.empty()) {
+                    return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "cannot encode empty custom type array without element type"});
+                }
+
+                const uint8_t custom_code = a.front().custom_code;
+                for (const auto& e : a) {
+                    if (e.custom_code != custom_code) {
+                        return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "custom type array contains mixed custom codes"});
+                    }
+                }
+
+                w.write_u8(TC_CustomTypeArray);
+                auto rc = write_size32(w, a.size(), "custom type array count");
+                if (!rc)
+                    return std::unexpected(rc.error());
+
+                w.write_u8(custom_code);
+                for (const auto& e : a) {
+                    auto rs = write_size32(w, e.data.size(), "custom element length");
+                    if (!rs)
+                        return std::unexpected(rs.error());
+                    w.write_bytes(e.data);
+                }
                 return {};
             } else {
                 return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "unsupported variant member"});
@@ -330,12 +1411,10 @@ std::expected<Value, Error> GpBinaryV18::decode_value(ByteReader& r, int depth) 
     if (!tc)
         return std::unexpected(tc.error());
 
-    uint8_t t = *tc;
+    const uint8_t t = *tc;
 
-    // optimized custom range
-    if (t >= 128 && t <= 227) {
-        uint8_t custom_code = static_cast<uint8_t>(t - 128);
-        auto size = r.read_varuint();
+    if (t >= 128 && t <= 228) {
+        auto size = r.read_varuint32();
         if (!size)
             return std::unexpected(size.error());
 
@@ -343,8 +1422,10 @@ std::expected<Value, Error> GpBinaryV18::decode_value(ByteReader& r, int depth) 
         if (!bytes)
             return std::unexpected(bytes.error());
 
-        RawCustomValue cv{.custom_code = custom_code, .data = ByteArray(bytes->begin(), bytes->end())};
-        return Value(std::move(cv));
+        return Value(RawCustomValue{
+            .custom_code = static_cast<uint8_t>(t - 128),
+            .data = ByteArray(bytes->begin(), bytes->end()),
+        });
     }
 
     switch (t) {
@@ -352,9 +1433,7 @@ std::expected<Value, Error> GpBinaryV18::decode_value(ByteReader& r, int depth) 
         auto b = r.read_u8();
         if (!b)
             return std::unexpected(b.error());
-        if (*b != 0 && *b != 1)
-            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "boolean not 0/1"});
-        return Value(*b == 1);
+        return Value(*b != 0);
     }
     case TC_BoolFalse:
         return Value(false);
@@ -398,7 +1477,7 @@ std::expected<Value, Error> GpBinaryV18::decode_value(ByteReader& r, int depth) 
         return Value(0.0);
 
     case TC_String: {
-        auto s = r.read_string();
+        auto s = read_string_v18(r);
         if (!s)
             return std::unexpected(s.error());
         return Value(std::move(*s));
@@ -408,13 +1487,14 @@ std::expected<Value, Error> GpBinaryV18::decode_value(ByteReader& r, int depth) 
         return Value(std::monostate{});
 
     case TC_CompressedInt32: {
-        auto u = r.read_varuint();
+        auto u = r.read_varuint32();
         if (!u)
             return std::unexpected(u.error());
         return Value(zigzag_decode_32(*u));
     }
+
     case TC_CompressedInt64: {
-        auto u = r.read_varuint();
+        auto u = r.read_varuint64();
         if (!u)
             return std::unexpected(u.error());
         return Value(zigzag_decode_64(*u));
@@ -430,6 +1510,7 @@ std::expected<Value, Error> GpBinaryV18::decode_value(ByteReader& r, int depth) 
             v = -v;
         return Value(v);
     }
+
     case TC_Int2_Pos:
     case TC_Int2_Neg: {
         auto mag = r.read_u16_le();
@@ -451,6 +1532,7 @@ std::expected<Value, Error> GpBinaryV18::decode_value(ByteReader& r, int depth) 
             v = -v;
         return Value(v);
     }
+
     case TC_L2_Pos:
     case TC_L2_Neg: {
         auto mag = r.read_u16_le();
@@ -472,7 +1554,7 @@ std::expected<Value, Error> GpBinaryV18::decode_value(ByteReader& r, int depth) 
         if (!code)
             return std::unexpected(code.error());
 
-        auto size = r.read_varuint();
+        auto size = r.read_varuint32();
         if (!size)
             return std::unexpected(size.error());
 
@@ -480,200 +1562,207 @@ std::expected<Value, Error> GpBinaryV18::decode_value(ByteReader& r, int depth) 
         if (!bytes)
             return std::unexpected(bytes.error());
 
-        RawCustomValue cv{.custom_code = *code, .data = ByteArray(bytes->begin(), bytes->end())};
-        return Value(std::move(cv));
+        return Value(RawCustomValue{
+            .custom_code = *code,
+            .data = ByteArray(bytes->begin(), bytes->end()),
+        });
     }
 
-    case TC_ObjectArray:
-    case TC_ArrayRecursive: {
-        auto count = r.read_varuint();
-        if (!count)
-            return std::unexpected(count.error());
+    case TC_ObjectArray: {
+        auto a = decode_object_array_payload(r, *this, depth);
+        if (!a)
+            return std::unexpected(a.error());
+        return Value(std::move(*a));
+    }
 
-        ObjectArray out;
-        out.reserve(static_cast<std::size_t>(*count));
-        for (uint64_t i = 0; i < *count; ++i) {
-            auto v = decode_value(r, depth + 1);
-            if (!v)
-                return std::unexpected(v.error());
-            out.push_back(std::move(*v));
-        }
-        return Value(std::move(out));
+    case TC_ArrayRecursive: {
+        auto a = decode_jagged_array_payload(r, *this, depth);
+        if (!a)
+            return std::unexpected(a.error());
+        return Value(std::move(*a));
     }
 
     case TC_Dictionary: {
-        auto kt = r.read_u8();
-        if (!kt)
-            return std::unexpected(kt.error());
-        auto vt = r.read_u8();
-        if (!vt)
-            return std::unexpected(vt.error());
-
-        // This implementation only supports Dictionary<byte, object>
-        if (*kt != TC_Byte)
-            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "only dictionary<byte,*> supported"});
-        (void)vt; // ignored; values are decoded as typed objects
-
-        auto count = r.read_varuint();
-        if (!count)
-            return std::unexpected(count.error());
-
-        Dictionary out;
-        for (uint64_t i = 0; i < *count; ++i) {
-            auto key = r.read_u8();
-            if (!key)
-                return std::unexpected(key.error());
-            auto val = decode_value(r, depth + 1);
-            if (!val)
-                return std::unexpected(val.error());
-            out[*key] = std::move(*val);
-        }
-        return Value(std::move(out));
+        auto hdr = read_dict_header(r);
+        if (!hdr)
+            return std::unexpected(hdr.error());
+        return decode_dictionary_payload_as_value(r, *this, *hdr, depth);
     }
 
     case TC_Hashtable: {
-        auto count = r.read_varuint();
-        if (!count)
-            return std::unexpected(count.error());
-
-        auto ht = std::make_shared<Hashtable>();
-        for (uint64_t i = 0; i < *count; ++i) {
-            auto k = decode_value(r, depth + 1);
-            if (!k)
-                return std::unexpected(k.error());
-            auto v = decode_value(r, depth + 1);
-            if (!v)
-                return std::unexpected(v.error());
-            ht->emplace(std::move(*k), std::move(*v));
-        }
-        return Value(ht);
+        auto ht = decode_hashtable_payload(r, *this, depth);
+        if (!ht)
+            return std::unexpected(ht.error());
+        return Value(std::move(*ht));
     }
 
     case TC_BooleanArray: {
-        auto count = r.read_varuint();
-        if (!count)
-            return std::unexpected(count.error());
-
-        std::size_t n = static_cast<std::size_t>(*count);
-        std::size_t nbytes = (n + 7) / 8;
-
-        auto raw = r.read_span(nbytes);
-        if (!raw)
-            return std::unexpected(raw.error());
-
-        std::vector<bool> out;
-        out.resize(n);
-        for (std::size_t i = 0; i < n; ++i) {
-            std::size_t bi = i / 8;
-            int bit = static_cast<int>(i % 8);
-            out[i] = (((*raw)[bi] >> bit) & 1u) != 0;
-        }
-        return Value(std::move(out));
+        TypeDesc desc{.kind = TypeDesc::Kind::BooleanArray};
+        return decode_payload_by_desc(r, *this, desc, depth);
     }
 
     case TC_ByteArray: {
-        auto len = r.read_varuint();
-        if (!len)
-            return std::unexpected(len.error());
-        auto s = r.read_span(static_cast<std::size_t>(*len));
-        if (!s)
-            return std::unexpected(s.error());
-        return Value(ByteArray(s->begin(), s->end()));
+        TypeDesc desc{.kind = TypeDesc::Kind::ByteArray};
+        return decode_payload_by_desc(r, *this, desc, depth);
     }
 
     case TC_Int16Array: {
-        auto count = r.read_varuint();
-        if (!count)
-            return std::unexpected(count.error());
-
-        std::vector<int16_t> out;
-        out.reserve(static_cast<std::size_t>(*count));
-        for (uint64_t i = 0; i < *count; ++i) {
-            auto v = r.read_i16_le();
-            if (!v)
-                return std::unexpected(v.error());
-            out.push_back(*v);
-        }
-        return Value(std::move(out));
+        TypeDesc desc{.kind = TypeDesc::Kind::ShortArray};
+        return decode_payload_by_desc(r, *this, desc, depth);
     }
 
     case TC_CompressedInt32Array: {
-        auto count = r.read_varuint();
-        if (!count)
-            return std::unexpected(count.error());
-
-        std::vector<int32_t> out;
-        out.reserve(static_cast<std::size_t>(*count));
-        for (uint64_t i = 0; i < *count; ++i) {
-            auto u = r.read_varuint();
-            if (!u)
-                return std::unexpected(u.error());
-            out.push_back(zigzag_decode_32(*u));
-        }
-        return Value(std::move(out));
+        TypeDesc desc{.kind = TypeDesc::Kind::IntArray};
+        return decode_payload_by_desc(r, *this, desc, depth);
     }
 
     case TC_CompressedInt64Array: {
-        auto count = r.read_varuint();
-        if (!count)
-            return std::unexpected(count.error());
-
-        std::vector<int64_t> out;
-        out.reserve(static_cast<std::size_t>(*count));
-        for (uint64_t i = 0; i < *count; ++i) {
-            auto u = r.read_varuint();
-            if (!u)
-                return std::unexpected(u.error());
-            out.push_back(zigzag_decode_64(*u));
-        }
-        return Value(std::move(out));
+        TypeDesc desc{.kind = TypeDesc::Kind::LongArray};
+        return decode_payload_by_desc(r, *this, desc, depth);
     }
 
     case TC_FloatArray: {
-        auto count = r.read_varuint();
-        if (!count)
-            return std::unexpected(count.error());
-
-        std::vector<float> out;
-        out.reserve(static_cast<std::size_t>(*count));
-        for (uint64_t i = 0; i < *count; ++i) {
-            auto v = r.read_f32_le();
-            if (!v)
-                return std::unexpected(v.error());
-            out.push_back(*v);
-        }
-        return Value(std::move(out));
+        TypeDesc desc{.kind = TypeDesc::Kind::FloatArray};
+        return decode_payload_by_desc(r, *this, desc, depth);
     }
 
     case TC_DoubleArray: {
-        auto count = r.read_varuint();
+        TypeDesc desc{.kind = TypeDesc::Kind::DoubleArray};
+        return decode_payload_by_desc(r, *this, desc, depth);
+    }
+
+    case TC_StringArray: {
+        TypeDesc desc{.kind = TypeDesc::Kind::StringArray};
+        return decode_payload_by_desc(r, *this, desc, depth);
+    }
+
+    case TC_OperationRequest: {
+        auto op = r.read_u8();
+        if (!op)
+            return std::unexpected(op.error());
+
+        auto params = decode_parameters(r, depth + 1);
+        if (!params)
+            return std::unexpected(params.error());
+
+        return Value(OperationRequestMessage{.operation_code = *op, .parameters = std::move(*params)});
+    }
+
+    case TC_OperationResponse: {
+        auto op = r.read_u8();
+        if (!op)
+            return std::unexpected(op.error());
+
+        auto rc = r.read_i16_le();
+        if (!rc)
+            return std::unexpected(rc.error());
+
+        auto debug_type = r.read_u8();
+        if (!debug_type)
+            return std::unexpected(debug_type.error());
+
+        std::optional<std::string> debug_message;
+        if (*debug_type == TC_String) {
+            auto s = read_string_v18(r);
+            if (!s)
+                return std::unexpected(s.error());
+            debug_message = std::move(*s);
+        } else if (*debug_type == TC_Null) {
+            debug_message.reset();
+        } else {
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "invalid operation response debug type"});
+        }
+
+        auto params = decode_parameters(r, depth + 1);
+        if (!params)
+            return std::unexpected(params.error());
+
+        return Value(OperationResponseMessage{
+            .operation_code = *op,
+            .return_code = *rc,
+            .debug_message = std::move(debug_message),
+            .parameters = std::move(*params),
+        });
+    }
+
+    case TC_EventData: {
+        auto code = r.read_u8();
+        if (!code)
+            return std::unexpected(code.error());
+
+        auto params = decode_parameters(r, depth + 1);
+        if (!params)
+            return std::unexpected(params.error());
+
+        return Value(EventMessage{.event_code = *code, .parameters = std::move(*params)});
+    }
+
+    case TC_HashtableArray: {
+        auto a = decode_hashtable_array_payload(r, *this, depth);
+        if (!a)
+            return std::unexpected(a.error());
+        return Value(std::move(*a));
+    }
+
+    case TC_DictionaryArray: {
+        auto hdr = read_dict_header(r);
+        if (!hdr)
+            return std::unexpected(hdr.error());
+
+        auto count = r.read_varuint32();
         if (!count)
             return std::unexpected(count.error());
 
-        std::vector<double> out;
+        if (is_byte_object_dict_header(*hdr)) {
+            std::vector<Dictionary> out;
+            out.reserve(static_cast<std::size_t>(*count));
+            for (uint32_t i = 0; i < *count; ++i) {
+                auto d = decode_convenience_dictionary_payload(r, *this, depth + 1);
+                if (!d)
+                    return std::unexpected(d.error());
+                out.push_back(std::move(*d));
+            }
+            return Value(std::move(out));
+        }
+
+        std::vector<GenericDictionary> out;
         out.reserve(static_cast<std::size_t>(*count));
-        for (uint64_t i = 0; i < *count; ++i) {
-            auto v = r.read_f64_le();
-            if (!v)
-                return std::unexpected(v.error());
-            out.push_back(*v);
+        for (uint32_t i = 0; i < *count; ++i) {
+            auto d = decode_generic_dictionary_payload(r, *this, *hdr, depth + 1);
+            if (!d)
+                return std::unexpected(d.error());
+            out.push_back(std::move(*d));
         }
         return Value(std::move(out));
     }
 
-    case TC_StringArray: {
-        auto count = r.read_varuint();
+    case TC_CustomTypeArray: {
+        auto count = r.read_varuint32();
         if (!count)
             return std::unexpected(count.error());
 
-        std::vector<std::string> out;
+        auto code = r.read_u8();
+        if (!code)
+            return std::unexpected(code.error());
+
+        std::vector<RawCustomValue> out;
         out.reserve(static_cast<std::size_t>(*count));
-        for (uint64_t i = 0; i < *count; ++i) {
-            auto s = r.read_string();
-            if (!s)
-                return std::unexpected(s.error());
-            out.push_back(std::move(*s));
+
+        for (uint32_t i = 0; i < *count; ++i) {
+            auto size = r.read_varuint32();
+            if (!size)
+                return std::unexpected(size.error());
+
+            auto bytes = r.read_span(static_cast<std::size_t>(*size));
+            if (!bytes)
+                return std::unexpected(bytes.error());
+
+            out.push_back(RawCustomValue{
+                .custom_code = *code,
+                .data = ByteArray(bytes->begin(), bytes->end()),
+            });
         }
+
         return Value(std::move(out));
     }
 
@@ -695,7 +1784,6 @@ std::expected<ByteArray, Error> GpBinaryV18::Serialize(const Message& message) {
             if constexpr (std::is_same_v<T, InitMessage>) {
                 kind = Kind::Init;
 
-                // fixed 39 bytes payload
                 payload.write_u8(m.protocol_major);
                 payload.write_u8(m.protocol_minor);
                 payload.write_u8(static_cast<uint8_t>((m.client_sdk_id << 1) & 0xFE));
@@ -713,7 +1801,7 @@ std::expected<ByteArray, Error> GpBinaryV18::Serialize(const Message& message) {
 
                 std::array<uint8_t, 32> app{};
                 std::memset(app.data(), 0, app.size());
-                std::size_t n = std::min<std::size_t>(app.size(), m.app_id.size());
+                const std::size_t n = std::min<std::size_t>(app.size(), m.app_id.size());
                 std::memcpy(app.data(), m.app_id.data(), n);
                 payload.write_bytes(app);
 
@@ -730,12 +1818,9 @@ std::expected<ByteArray, Error> GpBinaryV18::Serialize(const Message& message) {
                 payload.write_u8(m.operation_code);
                 payload.write_i16_le(m.return_code);
 
-                if (m.debug_message.has_value()) {
-                    payload.write_u8(TC_String);
-                    payload.write_string(*m.debug_message);
-                } else {
-                    payload.write_u8(TC_Null);
-                }
+                auto dbg = encode_debug_field_null_or_string(payload, m.debug_message);
+                if (!dbg)
+                    return std::unexpected(dbg.error());
 
                 return encode_parameters(payload, m.parameters, 0);
             } else if constexpr (std::is_same_v<T, EventMessage>) {
@@ -748,7 +1833,9 @@ std::expected<ByteArray, Error> GpBinaryV18::Serialize(const Message& message) {
 
                 if (m.message.has_value()) {
                     payload.write_u8(TC_String);
-                    payload.write_string(*m.message);
+                    auto rs = write_string_v18(payload, *m.message);
+                    if (!rs)
+                        return std::unexpected(rs.error());
                 } else {
                     payload.write_u8(TC_Null);
                 }
@@ -763,12 +1850,9 @@ std::expected<ByteArray, Error> GpBinaryV18::Serialize(const Message& message) {
                 payload.write_u8(m.operation_code);
                 payload.write_i16_le(m.return_code);
 
-                if (m.debug_message.has_value()) {
-                    payload.write_u8(TC_String);
-                    payload.write_string(*m.debug_message);
-                } else {
-                    payload.write_u8(TC_Null);
-                }
+                auto dbg = encode_debug_field_null_or_string(payload, m.debug_message);
+                if (!dbg)
+                    return std::unexpected(dbg.error());
 
                 return encode_parameters(payload, m.parameters, 0);
             } else if constexpr (std::is_same_v<T, GenericValueMessage>) {
@@ -816,11 +1900,9 @@ std::expected<Message, Error> GpBinaryV18::Deserialize(std::span<const uint8_t> 
     if (packet_bytes[0] != GP_MAGIC)
         return std::unexpected(Error{.code = Error::Code::BadMagic, .message = "bad magic"});
 
-    uint8_t b1 = packet_bytes[1];
-    bool encrypted = (b1 & 0x80) != 0;
-    uint8_t kind_u = (b1 & 0x7F);
-
-    Kind kind = static_cast<Kind>(kind_u);
+    const uint8_t b1 = packet_bytes[1];
+    const bool encrypted = (b1 & 0x80) != 0;
+    const Kind kind = static_cast<Kind>(b1 & 0x7F);
 
     std::span<const uint8_t> payload = packet_bytes.subspan(2);
 
@@ -860,7 +1942,10 @@ std::expected<Message, Error> GpBinaryV18::Deserialize(std::span<const uint8_t> 
 
         std::string app_id(reinterpret_cast<const char *>(app_span->data()), end);
 
-        InitMessage m{
+        if (r.remaining() != 0)
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "init extra bytes"});
+
+        return Message(InitMessage{
             .protocol_major = *protocol_major,
             .protocol_minor = *protocol_minor,
             .client_sdk_id = static_cast<uint8_t>((*sdk_enc) >> 1),
@@ -870,12 +1955,7 @@ std::expected<Message, Error> GpBinaryV18::Deserialize(std::span<const uint8_t> 
             .version_patch = *patch,
             .version_revision = *rev,
             .app_id = std::move(app_id),
-        };
-
-        if (r.remaining() != 0)
-            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "init extra bytes"});
-
-        return Message(std::move(m));
+        });
     }
 
     case Kind::InitResponse: {
@@ -935,7 +2015,7 @@ std::expected<Message, Error> GpBinaryV18::Deserialize(std::span<const uint8_t> 
 
         std::optional<std::string> debug_message;
         if (*debug_type == TC_String) {
-            auto s = r.read_string();
+            auto s = read_string_v18(r);
             if (!s)
                 return std::unexpected(s.error());
             debug_message = std::move(*s);
@@ -984,7 +2064,7 @@ std::expected<Message, Error> GpBinaryV18::Deserialize(std::span<const uint8_t> 
 
         std::optional<std::string> msg;
         if (*msg_type == TC_String) {
-            auto s = r.read_string();
+            auto s = read_string_v18(r);
             if (!s)
                 return std::unexpected(s.error());
             msg = std::move(*s);
@@ -1013,12 +2093,8 @@ std::expected<Message, Error> GpBinaryV18::Deserialize(std::span<const uint8_t> 
         return Message(GenericValueMessage{.value = std::move(*v)}, encrypted);
     }
 
-    case Kind::RawMessage: {
-        // payload is raw bytes
-        if (r.remaining() != 0)
-            return Message(RawMessage{.bytes = ByteArray(plaintext->begin(), plaintext->end())}, encrypted);
-        return Message(RawMessage{.bytes = ByteArray{}}, encrypted);
-    }
+    case Kind::RawMessage:
+        return Message(RawMessage{.bytes = ByteArray(plaintext->begin(), plaintext->end())}, encrypted);
 
     default:
         return std::unexpected(Error{.code = Error::Code::UnsupportedKind, .message = "unsupported message kind"});

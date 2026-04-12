@@ -89,18 +89,39 @@ bool Value::operator==(const Value& other) const {
 std::size_t ValueHash::operator()(const Value& v) const noexcept {
     std::size_t h = std::hash<std::size_t>{}(v.value.index());
 
-    auto hash_vec = [&](auto&& vec) {
+    auto hash_vec_values = [&](const auto& vec) {
         std::size_t out = 0;
-        for (const auto& e : vec) {
-            using E = std::decay_t<decltype(e)>;
-            if constexpr (std::is_same_v<E, bool>)
-                out = hash_combine(out, std::hash<bool>{}(e));
-            else if constexpr (std::is_same_v<E, float>)
-                out = hash_combine(out, std::hash<uint32_t>{}(std::bit_cast<uint32_t>(e)));
-            else if constexpr (std::is_same_v<E, double>)
-                out = hash_combine(out, std::hash<uint64_t>{}(std::bit_cast<uint64_t>(e)));
-            else
-                out = hash_combine(out, std::hash<E>{}(e));
+        for (const auto& e : vec)
+            out = hash_combine(out, ValueHash{}(e));
+        return out;
+    };
+
+    auto hash_dictionary = [&](const Dictionary& d) {
+        std::size_t out = 0;
+        for (const auto& [k, val] : d) {
+            std::size_t ph = hash_combine(std::hash<uint8_t>{}(k), ValueHash{}(val));
+            out ^= ph;
+        }
+        return out;
+    };
+
+    auto hash_hashtable_ptr = [&](const HashtablePtr& p) {
+        if (!p)
+            return std::size_t{0};
+
+        std::size_t out = 0;
+        for (const auto& [k, val] : *p) {
+            std::size_t ph = hash_combine(ValueHash{}(k), ValueHash{}(val));
+            out ^= ph;
+        }
+        return out;
+    };
+
+    auto hash_generic_dictionary = [&](const GenericDictionary& gd) {
+        std::size_t out = hash_bytes(gd.header);
+        for (const auto& [k, val] : gd.entries) {
+            out = hash_combine(out, ValueHash{}(k));
+            out = hash_combine(out, ValueHash{}(val));
         }
         return out;
     };
@@ -137,34 +158,63 @@ std::size_t ValueHash::operator()(const Value& v) const noexcept {
             } else if constexpr (std::is_same_v<T, std::vector<int16_t>> || std::is_same_v<T, std::vector<int32_t>> ||
                                  std::is_same_v<T, std::vector<int64_t>> || std::is_same_v<T, std::vector<float>> || std::is_same_v<T, std::vector<double>> ||
                                  std::is_same_v<T, std::vector<std::string>>) {
-                h = hash_combine(h, hash_vec(a));
+                std::size_t out = 0;
+                for (const auto& e : a) {
+                    using E = std::decay_t<decltype(e)>;
+                    if constexpr (std::is_same_v<E, float>)
+                        out = hash_combine(out, std::hash<uint32_t>{}(std::bit_cast<uint32_t>(e)));
+                    else if constexpr (std::is_same_v<E, double>)
+                        out = hash_combine(out, std::hash<uint64_t>{}(std::bit_cast<uint64_t>(e)));
+                    else
+                        out = hash_combine(out, std::hash<E>{}(e));
+                }
+                h = hash_combine(h, out);
             } else if constexpr (std::is_same_v<T, ObjectArray>) {
-                std::size_t out = 0;
-                for (const auto& e : a)
-                    out = hash_combine(out, ValueHash{}(e));
-                h = hash_combine(h, out);
+                h = hash_combine(h, hash_vec_values(a));
+            } else if constexpr (std::is_same_v<T, JaggedArray>) {
+                h = hash_combine(h, hash_vec_values(a.elements));
             } else if constexpr (std::is_same_v<T, Dictionary>) {
-                // order-insensitive: XOR pair hashes
-                std::size_t out = 0;
-                for (const auto& [k, val] : a) {
-                    std::size_t ph = hash_combine(std::hash<uint8_t>{}(k), ValueHash{}(val));
-                    out ^= ph;
-                }
-                h = hash_combine(h, out);
+                h = hash_combine(h, hash_dictionary(a));
+            } else if constexpr (std::is_same_v<T, GenericDictionary>) {
+                h = hash_combine(h, hash_generic_dictionary(a));
             } else if constexpr (std::is_same_v<T, std::shared_ptr<Hashtable>>) {
-                if (!a) {
-                    h = hash_combine(h, 0);
-                    return;
-                }
-                std::size_t out = 0;
-                for (const auto& [k, val] : *a) {
-                    std::size_t ph = hash_combine(ValueHash{}(k), ValueHash{}(val));
-                    out ^= ph;
-                }
-                h = hash_combine(h, out);
+                h = hash_combine(h, hash_hashtable_ptr(a));
             } else if constexpr (std::is_same_v<T, RawCustomValue>) {
                 h = hash_combine(h, std::hash<uint8_t>{}(a.custom_code));
                 h = hash_combine(h, hash_bytes(a.data));
+            } else if constexpr (std::is_same_v<T, EventMessage>) {
+                h = hash_combine(h, std::hash<uint8_t>{}(a.event_code));
+                h = hash_combine(h, hash_dictionary(a.parameters));
+            } else if constexpr (std::is_same_v<T, OperationRequestMessage>) {
+                h = hash_combine(h, std::hash<uint8_t>{}(a.operation_code));
+                h = hash_combine(h, hash_dictionary(a.parameters));
+            } else if constexpr (std::is_same_v<T, OperationResponseMessage>) {
+                h = hash_combine(h, std::hash<uint8_t>{}(a.operation_code));
+                h = hash_combine(h, std::hash<int16_t>{}(a.return_code));
+                h = hash_combine(h, a.debug_message ? std::hash<std::string>{}(*a.debug_message) : 0);
+                h = hash_combine(h, hash_dictionary(a.parameters));
+            } else if constexpr (std::is_same_v<T, std::vector<Dictionary>>) {
+                std::size_t out = 0;
+                for (const auto& d : a)
+                    out = hash_combine(out, hash_dictionary(d));
+                h = hash_combine(h, out);
+            } else if constexpr (std::is_same_v<T, std::vector<GenericDictionary>>) {
+                std::size_t out = 0;
+                for (const auto& d : a)
+                    out = hash_combine(out, hash_generic_dictionary(d));
+                h = hash_combine(h, out);
+            } else if constexpr (std::is_same_v<T, std::vector<HashtablePtr>>) {
+                std::size_t out = 0;
+                for (const auto& p : a)
+                    out = hash_combine(out, hash_hashtable_ptr(p));
+                h = hash_combine(h, out);
+            } else if constexpr (std::is_same_v<T, std::vector<RawCustomValue>>) {
+                std::size_t out = 0;
+                for (const auto& e : a) {
+                    out = hash_combine(out, std::hash<uint8_t>{}(e.custom_code));
+                    out = hash_combine(out, hash_bytes(e.data));
+                }
+                h = hash_combine(h, out);
             }
         },
         v.value);
