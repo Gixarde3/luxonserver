@@ -10,8 +10,6 @@
 
 namespace luxon::ser {
 namespace {
-constexpr int kMaxDepth = 32;
-
 enum TypeCode : uint8_t {
     TC_Unknown = 0x00,
     TC_Boolean = 0x02,
@@ -602,23 +600,6 @@ std::expected<std::vector<HashtablePtr>, Error> decode_hashtable_array_body(Byte
         out.push_back(std::move(v));
     }
     return out;
-}
-
-inline std::expected<void, Error> encode_custom_payload(ByteWriter& w, const RawCustomValue& v) {
-    if (v.data.size() > std::numeric_limits<uint32_t>::max())
-        return err(Error::Code::InvalidValue, "custom payload too large");
-
-    w.write_u8(v.custom_code);
-    w.write_varuint32(static_cast<uint32_t>(v.data.size()));
-    write_byte_array(w, v.data);
-    return {};
-}
-
-inline std::expected<RawCustomValue, Error> decode_custom_payload(ByteReader& r) {
-    LUXON_TRY_ASSIGN(code, r.read_u8());
-    LUXON_TRY_ASSIGN(len, r.read_varuint32());
-    LUXON_TRY_ASSIGN(bytes, r.read_span(static_cast<std::size_t>(len)));
-    return RawCustomValue{.custom_code = code, .data = ByteArray(bytes.begin(), bytes.end())};
 }
 
 inline std::expected<void, Error> encode_custom_typed(ByteWriter& w, const RawCustomValue& v) {
