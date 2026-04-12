@@ -119,13 +119,10 @@ void print_value(const ser::Value& value, int indent) {
                 std::cout << prefix << "array[" << v.size() << "]:\n";
                 for (size_t i = 0; i < v.size(); ++i) {
                     std::cout << prefix << "  [" << i << "]:\n";
-                    if constexpr (std::is_same_v<T, std::vector<bool>>) {
-                        // Explicitly cast proxy object to bool for std::vector<bool>
+                    if constexpr (std::is_same_v<T, std::vector<bool>>)
                         print_value(ser::Value(static_cast<bool>(v[i])), indent + 2);
-                    } else {
-                        // Standard constructor for everything else
+                    else
                         print_value(ser::Value(v[i]), indent + 2);
-                    }
                 }
 
             } else if constexpr (std::is_same_v<T, ser::Dictionary>) {
@@ -298,7 +295,6 @@ bool print_ser_message(const ser::ByteArray& data, int indent, ser::IProtocol& p
 
     std::string prefix(indent * 2, ' ');
 
-    // Quick check: Ser GP binary magic (optional, just to reduce noise)
     if (data[0] != ser::GP_MAGIC)
         return false;
 
