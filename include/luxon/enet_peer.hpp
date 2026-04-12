@@ -227,6 +227,7 @@ public:
     // Time related functions
     int get_server_time() const { return now_ms(); }
     static int create_time_base();
+    void sync_local_time_to_remote_dynamic(const EnetPeer& remote);
 
 private:
     // Core protocol helpers

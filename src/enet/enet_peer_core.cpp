@@ -682,6 +682,30 @@ int EnetPeer::create_time_base() {
     return (int)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
+void EnetPeer::sync_local_time_to_remote_dynamic(const EnetPeer& remote) {
+    // Calculate difference between old time base and remote's time base
+    const int time_diff = time_base_ - remote.time_base_;
+
+    // Adopt remote's time base
+    time_base_ = remote.time_base_;
+
+    // Shift all internal tracked time offsets so active timers don't break
+    time_int_ += time_diff;
+
+    if (timeout_int_ != 0)
+        timeout_int_ += time_diff;
+
+    time_last_ack_receive_ += time_diff;
+    time_last_send_ack_ += time_diff;
+    time_last_send_outgoing_ += time_diff;
+
+    // Shift the tracking time on all reliable commands currently in transit
+    for (auto& cmd : sent_reliable_) {
+        cmd.command_sent_time += time_diff;
+        cmd.timeout_time += time_diff;
+    }
+}
+
 void EnetPeer::send_connect() {
     // Send inital connect command
     EnetOutCommand oc;
