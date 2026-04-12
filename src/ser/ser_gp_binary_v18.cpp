@@ -1156,14 +1156,22 @@ std::expected<void, Error> GpBinaryV18::encode_value(ByteWriter& w, const Value&
     }
 
     if (const auto *p = v.get_ptr<float>()) {
-        w.write_u8(TC_Float);
-        w.write_f32_le(*p);
+        if (*p == 0.0f) {
+            w.write_u8(TC_FloatZero);
+        } else {
+            w.write_u8(TC_Float);
+            w.write_f32_le(*p);
+        }
         return {};
     }
 
     if (const auto *p = v.get_ptr<double>()) {
-        w.write_u8(TC_Double);
-        w.write_f64_le(*p);
+        if (*p == 0.0) {
+            w.write_u8(TC_DoubleZero);
+        } else {
+            w.write_u8(TC_Double);
+            w.write_f64_le(*p);
+        }
         return {};
     }
 
