@@ -110,20 +110,15 @@ struct EnetCommand {
         std::unique_ptr<DatagramBuffer> data;
         size_t size = 0;
 
-        // Default constructor
         HeapBuffer(std::unique_ptr<DatagramBuffer>&& data, size_t size) : data(std::move(data)), size(size) {}
 
-        // Custom Copy Constructor (Deep Copy)
         HeapBuffer(const HeapBuffer& other) : size(other.size) {
-            if (other.data) {
-                // Allocates a new DatagramBuffer and copies the contents
+            if (other.data)
                 data = std::make_unique<DatagramBuffer>(*other.data);
-            }
         }
 
-        // Custom Copy Assignment Operator (Deep Copy)
         HeapBuffer& operator=(const HeapBuffer& other) {
-            if (this != &other) { // Protect against self-assignment
+            if (this != &other) {
                 size = other.size;
                 if (other.data) {
                     data = std::make_unique<DatagramBuffer>(*other.data);
