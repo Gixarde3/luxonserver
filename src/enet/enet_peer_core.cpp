@@ -567,7 +567,7 @@ void EnetPeer::execute_command(const EnetCommand& cmd) {
     }
 }
 
-void EnetPeer::handle_incoming_datagram(const ByteArray& datagram) {
+void EnetPeer::handle_incoming_datagram(std::span<const uint8_t> datagram) {
     try {
         EnetPacketHeader hdr;
         auto cmds = parse_packet(datagram, hdr);

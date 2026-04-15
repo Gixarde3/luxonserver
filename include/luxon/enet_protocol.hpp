@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <vector>
 #include <optional>
+#include <span>
 #include <stdexcept>
 
 namespace luxon {
@@ -107,7 +108,7 @@ struct EnetCommand {
 uint32_t calculate_crc(const uint8_t *data, size_t length);
 
 // Parse a raw UDP datagram
-std::vector<EnetCommand> parse_packet(const ByteArray& datagram, EnetPacketHeader& out_header);
+std::vector<EnetCommand> parse_packet(std::span<const uint8_t> datagram, EnetPacketHeader& out_header);
 
 // Create a raw UDP datagram from header+commands
 ByteArray create_packet(EnetPacketHeader header, const std::vector<EnetCommand>& commands);

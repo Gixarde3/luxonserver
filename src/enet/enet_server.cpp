@@ -3,6 +3,9 @@
 
 #include "enet_peer.hpp"
 
+#include <array>
+#include <span>
+
 namespace luxon {
 namespace enet {
 EnetServer::EnetServer(EnetPeerConfig cfg) : cfg_(cfg) {
@@ -42,14 +45,14 @@ void EnetServer::remove_peer(std::shared_ptr<EnetPeer> peer) {
 
 void EnetServer::service_self() {
     // Poll socket
-    ByteArray buf(cfg_.mtu);
+    std::array<uint8_t, 1500> buf;
     for (;;) {
         EnetEndpoint from;
         size_t r = sock_.recv_from(buf.data(), buf.size(), from);
         if (r == 0)
             break;
 
-        ByteArray datagram(buf.begin(), buf.begin() + r);
+        std::span<const uint8_t> datagram(buf.begin(), buf.begin() + r);
 
         // Parse header to find challenge/peer id, etc.
         EnetPacketHeader hdr;

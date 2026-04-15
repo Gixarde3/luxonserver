@@ -199,7 +199,7 @@ public:
 
     // Feed datagrams received from socket. This parses, checks challenge, handles ACKs, handles sequencing and fragmentation
     // and queues payloads for dispatch
-    void handle_incoming_datagram(const ByteArray& datagram);
+    void handle_incoming_datagram(std::span<const uint8_t> datagram);
 
     // Dispatch exactly ONE queued incoming payload command
     // Returns true if something was dispatched
