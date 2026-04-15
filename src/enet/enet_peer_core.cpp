@@ -614,10 +614,12 @@ bool EnetPeer::dispatch_one() {
         EnetChannel& ch = *channels_[ci];
 
         if (!ch.incoming_unsequenced.empty()) {
-            EnetCommand cmd = ch.incoming_unsequenced.front();
-            ch.incoming_unsequenced.pop();
+            EnetCommand& cmd = ch.incoming_unsequenced.front();
+
             if (on_payload_command)
-                on_payload_command(cmd);
+                on_payload_command(std::move(cmd));
+
+            ch.incoming_unsequenced.pop();
             return true;
         }
 
@@ -647,11 +649,13 @@ bool EnetPeer::dispatch_one() {
                 ch.incoming_unreliable.erase(k);
 
             if (best != UINT32_MAX) {
-                EnetCommand cmd = ch.incoming_unreliable[best];
-                ch.incoming_unreliable.erase(best);
+                EnetCommand& cmd = ch.incoming_unreliable[best];
                 ch.incoming_unreliable_seq = cmd.unreliable_seq;
+
                 if (on_payload_command)
-                    on_payload_command(cmd);
+                    on_payload_command(std::move(cmd));
+
+                ch.incoming_unreliable.erase(best);
                 return true;
             }
         }
@@ -665,12 +669,13 @@ bool EnetPeer::dispatch_one() {
                 // Fragment not reassembled yet, so do not dispatch anything for this channel
                 continue;
 
-            EnetCommand cmd = it->second;
+            EnetCommand& cmd = it->second;
             ch.incoming_reliable_seq = cmd.header.reliable_seq;
-            ch.incoming_reliable.erase(it);
 
             if (on_payload_command)
-                on_payload_command(cmd);
+                on_payload_command(std::move(cmd));
+
+            ch.incoming_reliable.erase(it);
             return true;
         }
     }

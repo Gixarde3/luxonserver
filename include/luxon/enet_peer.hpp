@@ -207,7 +207,7 @@ public:
 
     // Callbacks (optional)
     std::function<void(EnetConnectionState)> on_state_changed;
-    std::function<void(const EnetCommand&)> on_payload_command;
+    std::function<void(EnetCommand&&)> on_payload_command;
     void reset_callbacks() {
         on_state_changed = nullptr;
         on_payload_command = nullptr;
