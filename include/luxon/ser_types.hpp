@@ -1,5 +1,7 @@
 #pragma once
 
+#include "flat_map.hpp"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -36,10 +38,10 @@ using HashtablePtr = std::shared_ptr<Hashtable>;
 
 using ObjectArray = std::vector<Value>;
 
-class Dictionary : public std::unordered_map<uint8_t, Value> {
+class Dictionary : public flat_map<uint8_t, Value> {
 public:
-    using std::unordered_map<uint8_t, Value>::unordered_map;
-    using std::unordered_map<uint8_t, Value>::operator[];
+    using flat_map<uint8_t, Value>::flat_map;
+    using flat_map<uint8_t, Value>::operator[];
 
     const Value& operator[](uint8_t key) const;
 };

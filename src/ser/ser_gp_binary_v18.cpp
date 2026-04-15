@@ -1045,17 +1045,10 @@ std::expected<void, Error> GpBinaryV18::encode_parameters(ByteWriter& w, const P
     if (params.size() > 255)
         return err(Error::Code::InvalidValue, "parameter count exceeds 255");
 
-    std::vector<std::pair<uint8_t, const Value *>> items;
-    items.reserve(params.size());
-    for (const auto& [k, v] : params)
-        items.emplace_back(k, &v);
-
-    std::sort(items.begin(), items.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-
-    w.write_u8(static_cast<uint8_t>(items.size()));
-    for (const auto& [k, v] : items) {
+    w.write_u8(static_cast<uint8_t>(params.size()));
+    for (const auto& [k, v] : params) {
         w.write_u8(k);
-        LUXON_TRY(encode_value(w, *v, depth + 1));
+        LUXON_TRY(encode_value(w, v, depth + 1));
     }
 
     return {};
