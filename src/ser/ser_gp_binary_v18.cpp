@@ -723,6 +723,8 @@ std::expected<Value, Error> decode_dictionary_body_from_header(ByteReader& r, co
 
     if (is_byte_object_header(header)) {
         Dictionary d{};
+        d.reserve(count);
+
         for (uint32_t i = 0; i < count; ++i) {
             LUXON_TRY_ASSIGN(kv, decode_payload_by_desc(r, header.key, depth + 1, decode_typed));
             const auto *key_ptr = kv.template get_ptr<uint8_t>();
@@ -1058,6 +1060,8 @@ std::expected<ParameterList, Error> GpBinaryV18::decode_parameters(ByteReader& r
     LUXON_TRY_ASSIGN(count, r.read_u8());
 
     ParameterList params{};
+    params.reserve(count);
+
     for (uint32_t i = 0; i < count; ++i) {
         LUXON_TRY_ASSIGN(k, r.read_u8());
         LUXON_TRY_ASSIGN(v, decode_value(r, depth + 1));
