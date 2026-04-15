@@ -5,9 +5,15 @@ The project is written in **C++23** and aims to be a lightweight, dependency-fle
 
 ## Legal Disclaimer
 
-> Luxon is an independent, open-source project developed for educational, interoperability and game preservation purposes. It is strictly a clean-room implementation.
+> Luxon is an independent, open‑source project developed by its contributors. It is **not** affiliated with, endorsed by, or sponsored by Exit Games GmbH or any of its subsidiaries.
 > 
-> This project is **not** affiliated with, endorsed by, sponsored by, or authorized by Exit Games Inc., Exit Games GmbH, or any of their subsidiaries. "Photon", "Photon Engine", and "Exit Games" are trademarks or registered trademarks of Exit Games. All trademarks and registered trademarks are the property of their respective owners. Use of these names does not imply any affiliation with or endorsement by them.
+> **Photon** and **Photon Realtime** are registered trademarks of Exit Games GmbH. All other trademarks, service marks, and trade names referenced in this project are the property of their respective owners.
+> 
+> Luxon is designed to be protocol‑compatible with the Photon Realtime client SDKs. This compatibility is achieved solely through the "Chinese Wall" doctrine.
+> 
+> Any use of the term "Photon" within this repository is for descriptive purposes only, to indicate compatibility, and does not imply any endorsement or official relationship.
+> 
+> If you are a representative of Exit Games and have concerns regarding this project, please contact me at tuxifan@posteo.de so I may address them promptly.
 
 ## Features
 
