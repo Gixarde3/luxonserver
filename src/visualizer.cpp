@@ -41,7 +41,7 @@ void print_indent(int indent) {
         std::cout << "  ";
 }
 
-void print_hex_dump(const ser::ByteArray& data, int indent) {
+void print_hex_dump(std::span<const uint8_t> data, int indent) {
     print_indent(indent);
     std::cout << "[ ";
     for (auto b : data)
@@ -207,7 +207,7 @@ void print_http_message(const HttpRequest& req, int indent) {
     std::cout << prefix << "  Content: " << req.body << std::endl;
 }
 
-bool print_http_message(const ser::ByteArray& data, int indent) {
+bool print_http_message(std::span<const uint8_t> data, int indent) {
     auto result = parse_raw_http(std::string_view{reinterpret_cast<const char *>(data.data()), data.size()});
     if (!result)
         return false;
@@ -289,7 +289,7 @@ void print_ser_message(const ser::Message& msg, int indent) {
     std::cout << std::endl;
 }
 
-bool print_ser_message(const ser::ByteArray& data, int indent, ser::IProtocol& proto) {
+bool print_ser_message(std::span<const uint8_t> data, int indent, ser::IProtocol& proto) {
     if (data.empty())
         return false;
 
@@ -308,7 +308,7 @@ bool print_ser_message(const ser::ByteArray& data, int indent, ser::IProtocol& p
     return true;
 }
 
-void print_enet_packet(const ser::ByteArray& data, ser::IProtocol& proto) {
+void print_enet_packet(std::span<const uint8_t> data, ser::IProtocol& proto) {
     enet::EnetPacketHeader header;
     std::vector<enet::EnetCommand> commands;
 
@@ -416,7 +416,7 @@ void print_enet_packet(const ser::ByteArray& data, ser::IProtocol& proto) {
             std::cout << "  Fragment: " << cmd.fragment_number << " / " << cmd.fragment_count << " (Total Len: " << cmd.fragment_total_length
                       << ", Offset: " << cmd.fragment_offset << ", StartSeq: " << cmd.fragment_start_seq << ")\n";
             std::cout << "  Fragment Payload:\n";
-            helpers::print_hex_dump(cmd.payload, 1);
+            helpers::print_hex_dump(cmd.get_payload(), 1);
         } else if (cmd.header.command_type == enet::EnetCommandType::SendUnreliable) {
             std::cout << "  Unreliable Seq: " << cmd.unreliable_seq << "\n";
         } else if (cmd.header.command_type == enet::EnetCommandType::SendUnreliableUnsequenced) {
@@ -430,18 +430,18 @@ void print_enet_packet(const ser::ByteArray& data, ser::IProtocol& proto) {
              cmd.header.command_type == enet::EnetCommandType::EgSendUnreliableProcessed);
 
         if (isDataCommand) {
-            if (!cmd.payload.empty()) {
-                if (!print_ser_message(cmd.payload, 1, proto)) {
-                    if (!print_http_message(cmd.payload, 1)) {
+            if (!cmd.is_payload_empty()) {
+                if (!print_ser_message(cmd.get_payload(), 1, proto)) {
+                    if (!print_http_message(cmd.get_payload(), 1)) {
                         std::cout << "  [Raw Payload Data]\n";
-                        helpers::print_hex_dump(cmd.payload, 1);
+                        helpers::print_hex_dump(cmd.get_payload(), 1);
                     }
                 }
             }
         } else if (cmd.header.command_type == enet::EnetCommandType::Connect || cmd.header.command_type == enet::EnetCommandType::VerifyConnect) {
-            if (!cmd.payload.empty()) {
+            if (!cmd.is_payload_empty()) {
                 std::cout << "  [Connect Payload]\n";
-                helpers::print_hex_dump(cmd.payload, 1);
+                helpers::print_hex_dump(cmd.get_payload(), 1);
             }
         }
     }

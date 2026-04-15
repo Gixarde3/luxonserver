@@ -6,12 +6,17 @@
 #include <cstdint>
 #include <vector>
 #include <optional>
+#include <array>
 #include <span>
+#include <memory>
+#include <variant>
 #include <stdexcept>
 
 namespace luxon {
 namespace enet {
 using ByteArray = std::vector<uint8_t>;
+using DatagramBuffer = std::array<uint8_t, 1500>;
+using DatagramView = std::span<const uint8_t>;
 
 class ProtocolError : public std::runtime_error {
 public:
@@ -101,7 +106,97 @@ struct EnetCommand {
     uint32_t fragment_total_length = 0;
     uint32_t fragment_offset = 0;
 
-    ByteArray payload; // command payload after type-specific fields
+    struct HeapBuffer {
+        std::unique_ptr<DatagramBuffer> data;
+        size_t size = 0;
+
+        // Default constructor
+        HeapBuffer(std::unique_ptr<DatagramBuffer>&& data, size_t size) : data(std::move(data)), size(size) {}
+
+        // Custom Copy Constructor (Deep Copy)
+        HeapBuffer(const HeapBuffer& other) : size(other.size) {
+            if (other.data) {
+                // Allocates a new DatagramBuffer and copies the contents
+                data = std::make_unique<DatagramBuffer>(*other.data);
+            }
+        }
+
+        // Custom Copy Assignment Operator (Deep Copy)
+        HeapBuffer& operator=(const HeapBuffer& other) {
+            if (this != &other) { // Protect against self-assignment
+                size = other.size;
+                if (other.data) {
+                    data = std::make_unique<DatagramBuffer>(*other.data);
+                } else {
+                    data.reset();
+                }
+            }
+            return *this;
+        }
+
+        HeapBuffer(HeapBuffer&& other) noexcept : data(std::move(other.data)), size(other.size) { other.size = 0; }
+
+        HeapBuffer& operator=(HeapBuffer&& other) noexcept {
+            if (this != &other) {
+                data = std::move(other.data);
+                size = other.size;
+                other.size = 0;
+            }
+            return *this;
+        }
+    };
+
+    std::variant<ByteArray, HeapBuffer> payload_;
+
+    std::span<uint8_t> get_payload() {
+        if (auto *dyn = std::get_if<ByteArray>(&payload_)) {
+            return *dyn;
+        }
+        auto& stat = std::get<HeapBuffer>(payload_);
+        if (!stat.data)
+            return {}; // Safety check
+        return {stat.data->begin(), stat.data->begin() + stat.size};
+    }
+
+    std::span<const uint8_t> get_payload() const {
+        if (auto *dyn = std::get_if<ByteArray>(&payload_)) {
+            return *dyn;
+        }
+        auto& stat = std::get<HeapBuffer>(payload_);
+        if (!stat.data)
+            return {};
+        return {stat.data->begin(), stat.data->begin() + stat.size};
+    }
+
+    size_t get_payload_size() const {
+        if (auto *dyn = std::get_if<ByteArray>(&payload_)) {
+            return dyn->size();
+        }
+        return std::get<HeapBuffer>(payload_).size;
+    }
+
+    bool is_payload_empty() const {
+        if (auto *dyn = std::get_if<ByteArray>(&payload_)) {
+            return dyn->empty();
+        }
+        return std::get<HeapBuffer>(payload_).size == 0;
+    }
+
+    void set_payload(DatagramView payload) {
+        // std::tuple_size_v resolves capacity of std::array at compile time
+        if (payload.size() > std::tuple_size_v<DatagramBuffer>) {
+            set_payload(ByteArray(payload.begin(), payload.end()));
+            return;
+        }
+
+        auto buffer = std::make_unique<DatagramBuffer>();
+        std::copy(payload.begin(), payload.end(), buffer->begin());
+        payload_ = HeapBuffer{std::move(buffer), payload.size()};
+    }
+
+    void set_payload(ByteArray payload) { payload_ = std::move(payload); }
+
+    void reset_payload() { payload_ = {}; }
 };
 
 // CRC32: init=0xFFFFFFFF, table poly=0xEDB88320, update: crc=(crc>>8) ^ table[byte ^ (crc&0xFF)], NO final xor
@@ -111,12 +206,12 @@ uint32_t calculate_crc(const uint8_t *data, size_t length);
 std::vector<EnetCommand> parse_packet(std::span<const uint8_t> datagram, EnetPacketHeader& out_header);
 
 // Create a raw UDP datagram from header+commands
-ByteArray create_packet(EnetPacketHeader header, const std::vector<EnetCommand>& commands);
+size_t create_packet(DatagramBuffer& out, EnetPacketHeader header, const std::vector<EnetCommand>& commands);
 
 // Helpers to serialize/deserialize individual commands
 EnetCommand parse_command(const uint8_t *data, size_t data_len, size_t& inout_offset);
 uint32_t compute_command_length(const EnetCommand& cmd);
-void write_command(ByteArray& out, const EnetCommand& cmd);
+void write_command(DatagramBuffer& out, unsigned& position, const EnetCommand& cmd);
 
 // Size helpers
 constexpr size_t kCmdHeaderSize = 12;

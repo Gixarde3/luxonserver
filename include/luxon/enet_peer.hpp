@@ -56,9 +56,10 @@ struct EnetPeerConfig {
 
     // Parse incoming connect command and extract configuration
     void apply_connect_command(const EnetCommand& cmd) {
-        if (cmd.header.command_type == EnetCommandType::Connect && cmd.payload.size() >= 12) {
-            mtu = static_cast<uint16_t>((cmd.payload[2] << 8) | cmd.payload[3]);
-            channel_count = cmd.payload[11];
+        if (cmd.header.command_type == EnetCommandType::Connect && cmd.get_payload_size() >= 12) {
+            const auto payload = cmd.get_payload();
+            mtu = static_cast<uint16_t>((payload[2] << 8) | payload[3]);
+            channel_count = payload[11];
         }
     }
 };
@@ -192,7 +193,7 @@ public:
 
     // Enqueue application payload to send (raw message bytes)
     // This API is transport-level: payload is the command payload (already contains message header like 0xF3 0x02 etc)
-    bool send_payload(const ByteArray& payload, const EnetSendOptions& opt);
+    bool send_payload(DatagramView payload, const EnetSendOptions& opt);
 
     // Process timers + resend + ping + send outgoing datagrams
     bool service();
@@ -267,7 +268,7 @@ private:
 
     // Datagram building/sending
     bool flush_send_queue(bool only_acks);
-    bool send_datagram(const ByteArray& datagram);
+    bool send_datagram(DatagramView datagram);
 
 private:
     EnetPeerConfig cfg_;
@@ -307,7 +308,7 @@ private:
 
     // outgoing buffers/queues
     uint8_t outgoing_command_count_ = 0;
-    std::deque<ByteArray> outgoing_ack_pool_; // each element is exactly 20 bytes (CmdSizeAck)
+    std::deque<std::array<uint8_t, 20>> outgoing_ack_pool_; // each element is exactly 20 bytes (CmdSizeAck)
 
     // sent reliable list (for retransmit)
     std::vector<EnetOutCommand> sent_reliable_;
@@ -329,7 +330,7 @@ private:
     std::queue<EnetCommand> dispatch_queue_;
 
     // Datagram queue: datagrams to be sent later
-    std::queue<ByteArray> datagram_queue_;
+    std::queue<std::pair<DatagramBuffer, size_t>> datagram_queue_;
 };
 
 // Server that accepts peers and routes datagrams to them

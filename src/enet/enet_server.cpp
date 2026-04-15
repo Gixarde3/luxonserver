@@ -45,14 +45,14 @@ void EnetServer::remove_peer(std::shared_ptr<EnetPeer> peer) {
 
 void EnetServer::service_self() {
     // Poll socket
-    std::array<uint8_t, 1500> buf;
+    DatagramBuffer buf;
     for (;;) {
         EnetEndpoint from;
         size_t r = sock_.recv_from(buf.data(), buf.size(), from);
         if (r == 0)
             break;
 
-        std::span<const uint8_t> datagram(buf.begin(), buf.begin() + r);
+        DatagramView datagram(buf.begin(), buf.begin() + r);
 
         // Parse header to find challenge/peer id, etc.
         EnetPacketHeader hdr;

@@ -28,20 +28,26 @@ static inline uint32_t read_u32_be(const uint8_t *p) {
     return v;
 }
 
-static inline void write_u16_be(ByteArray& out, uint16_t v) {
+static inline void write_u16_be(DatagramBuffer& out, unsigned& position, uint16_t v) {
     if constexpr (std::endian::native == std::endian::little)
         v = std::byteswap(v);
     const uint8_t *p = reinterpret_cast<const uint8_t *>(&v);
-    out.insert(out.end(), p, p + 2);
+
+    out.at(position++) = p[0];
+    out.at(position++) = p[1];
 }
 
-static inline void write_i16_be(ByteArray& out, int16_t v) { write_u16_be(out, static_cast<uint16_t>(v)); }
+static inline void write_i16_be(DatagramBuffer& out, unsigned& position, int16_t v) { write_u16_be(out, position, static_cast<uint16_t>(v)); }
 
-static inline void write_u32_be(ByteArray& out, uint32_t v) {
+static inline void write_u32_be(DatagramBuffer& out, unsigned& position, uint32_t v) {
     if constexpr (std::endian::native == std::endian::little)
         v = std::byteswap(v);
     const uint8_t *p = reinterpret_cast<const uint8_t *>(&v);
-    out.insert(out.end(), p, p + 4);
+
+    out.at(position++) = p[0];
+    out.at(position++) = p[1];
+    out.at(position++) = p[2];
+    out.at(position++) = p[3];
 }
 
 static inline void ensure_available(size_t need, size_t have, const char *msg) {
@@ -156,7 +162,7 @@ EnetCommand parse_command(const uint8_t *data, size_t data_len, size_t& inout_of
     // Remaining bytes in this command are payload
     const size_t payload_len = (cmd_start + cmd_len) - off;
     if (payload_len > 0)
-        cmd.payload.assign(data + off, data + off + payload_len);
+        cmd.set_payload(DatagramView{data + off, data + off + payload_len});
 
     inout_offset = cmd_start + cmd_len;
     return cmd;
@@ -169,74 +175,78 @@ uint32_t compute_command_length(const EnetCommand& cmd) {
     case EnetCommandType::Acknowledge:
     case EnetCommandType::EgAcknowledgeUnsequenced:
         fres += 8;
-        fres += static_cast<uint32_t>(cmd.payload.size());
+        fres += static_cast<uint32_t>(cmd.get_payload_size());
         break;
 
     case EnetCommandType::SendUnreliable:
         fres += 4;
-        fres += static_cast<uint32_t>(cmd.payload.size());
+        fres += static_cast<uint32_t>(cmd.get_payload_size());
         break;
 
     case EnetCommandType::SendUnreliableUnsequenced:
         fres += 4;
-        fres += static_cast<uint32_t>(cmd.payload.size());
+        fres += static_cast<uint32_t>(cmd.get_payload_size());
         break;
 
     case EnetCommandType::SendFragment:
     case EnetCommandType::EgSendFragmentUnsequenced:
         fres += 20;
-        fres += static_cast<uint32_t>(cmd.payload.size());
+        fres += static_cast<uint32_t>(cmd.get_payload_size());
         break;
 
     default:
-        fres += static_cast<uint32_t>(cmd.payload.size());
+        fres += static_cast<uint32_t>(cmd.get_payload_size());
         break;
     }
 
     return fres;
 }
 
-void write_command(ByteArray& out, const EnetCommand& cmd) {
+void write_command(DatagramBuffer& out, unsigned& position, const EnetCommand& cmd) {
     // Compute total length
     const uint32_t total_len = compute_command_length(cmd);
 
-    out.push_back(static_cast<uint8_t>(cmd.header.command_type));
-    out.push_back(cmd.header.channel_id);
-    out.push_back(cmd.header.flags);
-    out.push_back(cmd.header.reserved);
-    write_u32_be(out, total_len);
-    write_u32_be(out, cmd.header.reliable_seq);
+    out.at(position++) = static_cast<uint8_t>(cmd.header.command_type);
+    out.at(position++) = cmd.header.channel_id;
+    out.at(position++) = cmd.header.flags;
+    out.at(position++) = cmd.header.reserved;
+    write_u32_be(out, position, total_len);
+    write_u32_be(out, position, cmd.header.reliable_seq);
 
     switch (cmd.header.command_type) {
     case EnetCommandType::Acknowledge:
     case EnetCommandType::EgAcknowledgeUnsequenced:
-        write_u32_be(out, cmd.ack_received_reliable_sequence_number);
-        write_u32_be(out, cmd.ack_received_sent_time);
+        write_u32_be(out, position, cmd.ack_received_reliable_sequence_number);
+        write_u32_be(out, position, cmd.ack_received_sent_time);
         break;
 
     case EnetCommandType::SendUnreliable:
-        write_u32_be(out, cmd.unreliable_seq);
+        write_u32_be(out, position, cmd.unreliable_seq);
         break;
 
     case EnetCommandType::SendUnreliableUnsequenced:
-        write_u32_be(out, cmd.unsequenced_group_number);
+        write_u32_be(out, position, cmd.unsequenced_group_number);
         break;
 
     case EnetCommandType::SendFragment:
     case EnetCommandType::EgSendFragmentUnsequenced:
-        write_u32_be(out, cmd.fragment_start_seq);
-        write_u32_be(out, cmd.fragment_count);
-        write_u32_be(out, cmd.fragment_number);
-        write_u32_be(out, cmd.fragment_total_length);
-        write_u32_be(out, cmd.fragment_offset);
+        write_u32_be(out, position, cmd.fragment_start_seq);
+        write_u32_be(out, position, cmd.fragment_count);
+        write_u32_be(out, position, cmd.fragment_number);
+        write_u32_be(out, position, cmd.fragment_total_length);
+        write_u32_be(out, position, cmd.fragment_offset);
         break;
 
     default:
         break;
     }
 
-    if (!cmd.payload.empty())
-        out.insert(out.end(), cmd.payload.begin(), cmd.payload.end());
+    if (!cmd.is_payload_empty()) {
+        out.at(position + cmd.get_payload_size() - 1); // Quick bounds check
+        const auto payload = cmd.get_payload();
+        std::copy(payload.begin(), payload.end(), out.begin() + position);
+        position += cmd.get_payload_size();
+    }
 }
 
 std::vector<EnetCommand> parse_packet(std::span<const uint8_t> datagram, EnetPacketHeader& out_header) {
@@ -283,35 +293,33 @@ std::vector<EnetCommand> parse_packet(std::span<const uint8_t> datagram, EnetPac
     return cmds;
 }
 
-ByteArray create_packet(EnetPacketHeader header, const std::vector<EnetCommand>& commands) {
+size_t create_packet(DatagramBuffer& out, EnetPacketHeader header, const std::vector<EnetCommand>& commands) {
     header.command_count = static_cast<uint8_t>(commands.size());
 
     if (header.type == EnetUdpHeaderType::Encrypted)
         throw ProtocolError("ENet: encrypted datagram to be created but not supported");
 
-    // Plain packet
-    ByteArray out;
-    out.reserve(16 + 256);
+    unsigned position{};
 
-    write_i16_be(out, header.peer_id);
-    out.push_back(static_cast<uint8_t>(header.type));
-    out.push_back(header.command_count);
-    write_u32_be(out, header.sent_time);
-    write_u32_be(out, header.challenge);
+    write_i16_be(out, position, header.peer_id);
+    out.at(position++) = static_cast<uint8_t>(header.type);
+    out.at(position++) = header.command_count;
+    write_u32_be(out, position, header.sent_time);
+    write_u32_be(out, position, header.challenge);
 
     size_t crc_pos = 0;
     if (header.type == EnetUdpHeaderType::PlainWithCrc) {
         // placeholder
-        crc_pos = out.size();
-        write_u32_be(out, 0);
+        crc_pos = position;
+        write_u32_be(out, position, 0);
     }
 
     for (const auto& c : commands)
-        write_command(out, c);
+        write_command(out, position, c);
 
     if (header.type == EnetUdpHeaderType::PlainWithCrc) {
         // Compute CRC with field zeroed
-        uint32_t crc = calculate_crc(out.data(), out.size(), 4);
+        uint32_t crc = calculate_crc(out.data(), position, 4);
 
         // Write CRC back big-endian at crc_pos
         uint32_t be = crc;
@@ -320,7 +328,7 @@ ByteArray create_packet(EnetPacketHeader header, const std::vector<EnetCommand>&
         std::memcpy(out.data() + crc_pos, &be, 4);
     }
 
-    return out;
+    return position;
 }
 } // namespace enet
 } // namespace luxon

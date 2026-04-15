@@ -106,10 +106,10 @@ void EnetPeer::attach_server_side(UdpSocket& sock, const EnetEndpoint& remote, i
     oc.cmd.header.flags = FlagValue::Reliable;
 
     // VerifyConnect payload is 32 bytes: first two bytes are assigned peerID, then 30 bytes unused(?)
-    ByteArray payload(32, 0);
+    DatagramBuffer payload;
     payload[0] = (uint8_t)((uint16_t)assigned_peer_id >> 8);
     payload[1] = (uint8_t)((uint16_t)assigned_peer_id & 0xFF);
-    oc.cmd.payload = payload;
+    oc.cmd.set_payload(DatagramView{payload.begin(), payload.begin() + 32});
 
     queue_outgoing_reliable(std::move(oc));
     flush_send_queue(false);
@@ -169,7 +169,7 @@ const EnetChannel& EnetPeer::channel(uint8_t ch) const {
     return *channels_.at(ch);
 }
 
-bool EnetPeer::send_payload(const ByteArray& payload, const EnetSendOptions& opt) {
+bool EnetPeer::send_payload(DatagramView payload, const EnetSendOptions& opt) {
     if (state_ != EnetConnectionState::Connected)
         return false;
     if (opt.channel >= cfg_.channel_count)
@@ -206,14 +206,14 @@ bool EnetPeer::send_payload(const ByteArray& payload, const EnetSendOptions& opt
             oc.cmd.header.command_type = ct;
             oc.cmd.header.channel_id = opt.channel;
             oc.cmd.header.flags = flags;
-            oc.cmd.payload = payload;
+            oc.cmd.set_payload(payload);
             queue_outgoing_reliable(std::move(oc));
         } else {
             EnetCommand c;
             c.header.command_type = ct;
             c.header.channel_id = opt.channel;
             c.header.flags = flags;
-            c.payload = payload;
+            c.set_payload(payload);
             queue_outgoing_unreliable(std::move(c));
         }
         return true;
@@ -242,7 +242,7 @@ bool EnetPeer::send_payload(const ByteArray& payload, const EnetSendOptions& opt
         oc.cmd.fragment_total_length = (uint32_t)payload.size();
         oc.cmd.fragment_offset = (uint32_t)off;
 
-        oc.cmd.payload.assign(payload.begin() + off, payload.begin() + off + len);
+        oc.cmd.set_payload(DatagramView{payload.begin() + off, payload.begin() + off + len});
 
         queue_outgoing_reliable(std::move(oc));
     }
@@ -265,20 +265,22 @@ void EnetPeer::queue_outgoing_ack(const EnetCommand& received_reliable_cmd, uint
     ack.ack_received_sent_time = sent_time;
 
     // Serialize this ACK command alone into a 20-byte buffer and push to pool
-    ByteArray buf;
-    buf.reserve(20);
+    std::array<uint8_t, 20> buf;
+    unsigned position{};
+
     // Header
-    buf.push_back(static_cast<uint8_t>(ack.header.command_type));
-    buf.push_back(ack.header.channel_id);
-    buf.push_back(ack.header.flags);
-    buf.push_back(ack.header.reserved);
+    buf.at(position++) = static_cast<uint8_t>(ack.header.command_type);
+    buf.at(position++) = ack.header.channel_id;
+    buf.at(position++) = ack.header.flags;
+    buf.at(position++) = ack.header.reserved;
 
     auto write_u32_be = [&](uint32_t v) {
         uint32_t be = v;
         if constexpr (std::endian::native == std::endian::little)
             be = std::byteswap(be);
         const uint8_t *p = reinterpret_cast<const uint8_t *>(&be);
-        buf.insert(buf.end(), p, p + 4);
+        std::copy(p, p + 4, buf.begin() + position);
+        position += 4;
     };
 
     // command_length=20, reliable_seq=0 (writes Size=20 then reliableSequenceNumber=0)
@@ -288,9 +290,9 @@ void EnetPeer::queue_outgoing_ack(const EnetCommand& received_reliable_cmd, uint
     write_u32_be(ack.ack_received_reliable_sequence_number);
     write_u32_be(ack.ack_received_sent_time);
 
-    if (buf.size() != 20)
+    if (position != buf.size())
         throw std::runtime_error("ACK serialization size mismatch");
-    outgoing_ack_pool_.push_back(std::move(buf));
+    outgoing_ack_pool_.push_back(buf);
 }
 
 void EnetPeer::queue_sent_reliable(EnetOutCommand& outcmd) {
@@ -404,12 +406,13 @@ void EnetPeer::handle_fragment(const EnetCommand& fragment_cmd) {
         EnetCommand frag;
         ch.try_get_fragment(s, sequenced, frag);
 
-        std::memcpy(full.data() + frag.fragment_offset, frag.payload.data(), frag.payload.size());
+        const auto payload = frag.get_payload();
+        std::memcpy(full.data() + frag.fragment_offset, payload.data(), payload.size());
         ch.remove_fragment(frag.header.reliable_seq, sequenced);
     }
 
     EnetCommand combined = start;
-    combined.payload = std::move(full);
+    combined.set_payload(std::move(full));
 
     combined.header.reliable_seq = fragment_cmd.fragment_start_seq + fragment_cmd.fragment_count - 1;
 
@@ -506,8 +509,9 @@ void EnetPeer::execute_command(const EnetCommand& cmd) {
 
     case EnetCommandType::VerifyConnect: {
         // Client side: assign peer_id from first two payload bytes if we were connecting
-        if (state_ == EnetConnectionState::Connecting && cmd.payload.size() >= 2) {
-            int16_t pid = (int16_t)((cmd.payload[0] << 8) | cmd.payload[1]);
+        const auto payload = cmd.get_payload();
+        if (state_ == EnetConnectionState::Connecting && payload.size() >= 2) {
+            int16_t pid = (int16_t)((payload[0] << 8) | payload[1]);
             if (peer_id_ == -1 || peer_id_ == -2)
                 peer_id_ = pid;
 
@@ -550,7 +554,7 @@ void EnetPeer::execute_command(const EnetCommand& cmd) {
         if (state_ == EnetConnectionState::Connected) {
             // Check fragment sanity
             if (cmd.fragment_number >= cmd.fragment_count || cmd.fragment_offset >= cmd.fragment_total_length ||
-                cmd.fragment_offset + cmd.payload.size() > cmd.fragment_total_length) {
+                cmd.fragment_offset + cmd.get_payload_size() > cmd.fragment_total_length) {
                 // Invalid fragment, drop immediately to avoid corrupting the reassembly buffer
                 break;
             }
@@ -570,7 +574,7 @@ void EnetPeer::execute_command(const EnetCommand& cmd) {
 void EnetPeer::handle_incoming_datagram(std::span<const uint8_t> datagram) {
     try {
         EnetPacketHeader hdr;
-        auto cmds = parse_packet(datagram, hdr);
+        std::vector<EnetCommand> cmds = parse_packet(datagram, hdr);
 
         bytes_in_ += datagram.size();
 
@@ -722,7 +726,7 @@ void EnetPeer::send_connect() {
     // These constants seem somewhat random but are apparently required?
     // In Wireshark these constants always seem to be sent, no matter what
     // They're probably just magic constants
-    ByteArray payload(32, 0);
+    DatagramBuffer payload;
     // [2..3] mtu
     payload[2] = (uint8_t)(cfg_.mtu >> 8);
     payload[3] = (uint8_t)(cfg_.mtu & 0xFF);
@@ -732,7 +736,7 @@ void EnetPeer::send_connect() {
     payload[23] = 136;
     payload[27] = 2;
     payload[31] = 2;
-    oc.cmd.payload = payload;
+    oc.cmd.set_payload(DatagramView{payload.begin(), payload.begin() + 32});
 
     queue_outgoing_reliable(std::move(oc));
     flush_send_queue(false);
@@ -744,7 +748,8 @@ bool EnetPeer::flush_send_queue(bool only_acks) {
 
     // Attempt to send still queued datagrams first
     while (!datagram_queue_.empty()) {
-        if (send_datagram(datagram_queue_.front()))
+        const auto& [datagram_buf, datagram_size] = datagram_queue_.front();
+        if (send_datagram(DatagramView{datagram_buf.begin(), datagram_buf.begin() + datagram_size}))
             datagram_queue_.pop();
         else
             return false;
@@ -825,7 +830,7 @@ bool EnetPeer::flush_send_queue(bool only_acks) {
 
             // Reuse command parser on a fake buffer that begins with the ack header (command parser expects command header at 0)
             // We'll just parse via manual decode:
-            const ByteArray& b = outgoing_ack_pool_.front();
+            const DatagramView b = outgoing_ack_pool_.front();
             if (b.size() != 20) {
                 outgoing_ack_pool_.pop_front();
                 continue;
@@ -897,14 +902,17 @@ bool EnetPeer::flush_send_queue(bool only_acks) {
         hdr.sent_time = (uint32_t)time_int_;
         hdr.challenge = challenge_;
 
-        ByteArray datagram = create_packet(hdr, cmds_to_send);
-        bytes_out_ += datagram.size();
+        DatagramBuffer datagram_buf;
+        size_t actual_len = create_packet(datagram_buf, hdr, cmds_to_send);
+        bytes_out_ += actual_len;
+
+        DatagramView active_view{datagram_buf.data(), actual_len};
 
         // Try to send datagram
-        if (!send_datagram(datagram)) {
-            // Failure, send again later if there's any reliable data in it
+        if (!send_datagram(active_view)) {
             if (has_reliable_data) {
-                datagram_queue_.emplace(std::move(datagram));
+                // You also need to change datagram_queue_ to store the length!
+                datagram_queue_.push({datagram_buf, actual_len});
                 return false;
             }
         }
@@ -914,7 +922,7 @@ bool EnetPeer::flush_send_queue(bool only_acks) {
     return true;
 }
 
-bool EnetPeer::send_datagram(const ByteArray& datagram) {
+bool EnetPeer::send_datagram(DatagramView datagram) {
     if (remote_)
         return sock_->send_to(datagram.data(), datagram.size(), *remote_);
     else

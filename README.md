@@ -9,7 +9,7 @@ The project is written in **C++23** and aims to be a lightweight, dependency-fle
 > 
 > **Photon** and **Photon Realtime** are registered trademarks of Exit Games GmbH. All other trademarks, service marks, and trade names referenced in this project are the property of their respective owners.
 > 
-> Luxon is designed to be protocol‑compatible with the Photon Realtime client SDKs. This compatibility is achieved solely through the "Chinese Wall" doctrine.
+> Luxon is designed to be protocol‑compatible with the Photon Realtime client SDKs. This compatibility is achieved through the "Chinese Wall" doctrine and through black-box reverse engineering.
 > 
 > Any use of the term "Photon" within this repository is for descriptive purposes only, to indicate compatibility, and does not imply any endorsement or official relationship.
 > 
