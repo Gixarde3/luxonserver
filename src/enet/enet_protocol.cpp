@@ -164,21 +164,47 @@ static uint32_t *crc_table_ptr() {
 }
 } // namespace
 
-uint32_t calculate_crc(const uint8_t *data, size_t length, unsigned leading_zeros = 4) {
+uint32_t calculate_crc(const uint8_t *data, size_t length) {
     uint32_t crc = 0xFFFFFFFFu;
     const uint32_t *tbl = crc_table_ptr();
 
-    // Cap leading_zeros to avoid overflowing the total length
-    size_t zeros_count = (leading_zeros < length) ? leading_zeros : length;
-
-    // Process the leading zeros
-    for (size_t i = 0; i < zeros_count; ++i)
-        crc = (crc >> 8) ^ tbl[crc & 0xFF];
-
-    // Process the actual data using pointers
-    const uint8_t *p = data + zeros_count;
+    const uint8_t *p = data;
     const uint8_t *end = data + length;
 
+    while (p != end)
+        crc = (crc >> 8) ^ tbl[(*p++) ^ (crc & 0xFF)];
+
+    return crc;
+}
+
+uint32_t calculate_crc(const uint8_t *data, size_t length, size_t zero_start, size_t zero_end) {
+    uint32_t crc = 0xFFFFFFFFu;
+    const uint32_t *tbl = crc_table_ptr();
+
+    // Clamp the zeroed range to [0, length]
+    if (zero_start > length)
+        zero_start = length;
+    if (zero_end > length)
+        zero_end = length;
+    if (zero_end < zero_start)
+        zero_end = zero_start;
+
+    const uint8_t *p = data;
+    const uint8_t *zero_begin_ptr = data + zero_start;
+    const uint8_t *zero_end_ptr = data + zero_end;
+    const uint8_t *end = data + length;
+
+    // Process bytes before the zeroed range
+    while (p != zero_begin_ptr)
+        crc = (crc >> 8) ^ tbl[(*p++) ^ (crc & 0xFF)];
+
+    // Process the zeroed range as if the bytes were 0
+    while (p != zero_end_ptr) {
+        crc = (crc >> 8) ^ tbl[crc & 0xFF];
+        ++p;
+    }
+
+    // Process bytes after the zeroed range
     while (p != end)
         crc = (crc >> 8) ^ tbl[(*p++) ^ (crc & 0xFF)];
 
@@ -367,7 +393,7 @@ std::vector<EnetCommand> parse_packet(std::span<const uint8_t> datagram, EnetPac
         uint32_t recv_crc = read_u32_be(p + off);
         out_header.crc32 = recv_crc;
 
-        uint32_t calc = calculate_crc(datagram.data(), datagram.size(), 4);
+        uint32_t calc = calculate_crc(datagram.data(), datagram.size(), off, off + 4);
         if (calc != recv_crc)
             throw CRCError("ENet: CRC mismatch");
         off += 4;
@@ -409,8 +435,8 @@ size_t create_packet(DatagramBuffer& out, EnetPacketHeader header, const std::ve
         write_command(out, position, c);
 
     if (header.type == EnetUdpHeaderType::PlainWithCrc) {
-        // Compute CRC with field zeroed
-        uint32_t crc = calculate_crc(out.data(), position, 4);
+        // Compute CRC (the field at crc_pos was already written as zero)
+        uint32_t crc = calculate_crc(out.data(), position);
 
         // Write CRC back big-endian at crc_pos
         uint32_t be = crc;
