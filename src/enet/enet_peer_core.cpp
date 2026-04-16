@@ -7,6 +7,7 @@
 #include <random>
 #include <algorithm>
 #include <chrono>
+#include <utility>
 #include <cstring>
 #ifdef HAS_NETDB
 #include <netdb.h>
@@ -46,6 +47,8 @@ EnetPeer::EnetPeer(EnetPeerConfig cfg) : cfg_(cfg) {
     channels_.push_back(std::make_unique<EnetChannel>(ControlChannel));
 
     sent_reliable_.reserve(100);
+
+    cfg.mtu = std::min<size_t>(cfg.mtu, std::tuple_size_v<DatagramBuffer>);
 }
 
 bool EnetPeer::use(UdpSocket& sock) {

@@ -15,7 +15,7 @@
 namespace luxon {
 namespace enet {
 using ByteArray = std::vector<uint8_t>;
-using DatagramBuffer = std::array<uint8_t, 1500>;
+using DatagramBuffer = std::array<uint8_t, 1200>;
 using DatagramView = std::span<const uint8_t>;
 
 class DatagramBufferPool {
