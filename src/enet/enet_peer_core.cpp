@@ -911,7 +911,6 @@ bool EnetPeer::flush_send_queue(bool only_acks) {
         // Try to send datagram
         if (!send_datagram(active_view)) {
             if (has_reliable_data) {
-                // You also need to change datagram_queue_ to store the length!
                 datagram_queue_.push({datagram_buf, actual_len});
                 return false;
             }
