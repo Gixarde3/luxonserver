@@ -4,12 +4,12 @@
 #pragma once
 
 #include "enet_protocol.hpp"
+#include "sliding_flat_map.hpp"
 
 #include <vector>
 #include <array>
 #include <queue>
 #include <unordered_map>
-#include <map>
 #include <set>
 #include <deque>
 #include <optional>
@@ -149,10 +149,10 @@ public:
     std::queue<EnetCommand> outgoing_unreliable;
 
     // incoming storage
-    std::map<uint32_t, EnetCommand> incoming_reliable;          // by reliable_seq
-    std::map<uint32_t, EnetCommand> incoming_unreliable;        // by unreliable_seq
-    std::queue<EnetCommand> incoming_unsequenced;               // ready to dispatch (also reassembled frags)
-    std::map<uint32_t, EnetCommand> incoming_unsequenced_frags; // reliable_seq -> fragment cmd for unsequenced fragments
+    sliding_flat_map<uint32_t, EnetCommand, 1024> incoming_reliable;          // by reliable_seq
+    sliding_flat_map<uint32_t, EnetCommand, 1024> incoming_unreliable;        // by unreliable_seq
+    std::queue<EnetCommand> incoming_unsequenced;                             // ready to dispatch (also reassembled frags)
+    sliding_flat_map<uint32_t, EnetCommand, 1024> incoming_unsequenced_frags; // reliable_seq -> fragment cmd for unsequenced fragments
 
     // seq numbers
     uint32_t incoming_reliable_seq = 0;
@@ -169,6 +169,10 @@ public:
     bool try_get_fragment(uint32_t reliable_seq, bool sequenced, EnetCommand& out) const;
     void remove_fragment(uint32_t reliable_seq, bool sequenced);
     void clear_all();
+
+    void sync_reliable_window();
+    void sync_unreliable_window();
+    void sync_reliable_unsequenced_fragment_window();
 
 private:
     uint8_t channel_;

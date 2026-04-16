@@ -369,7 +369,6 @@ std::optional<EnetOutCommand> EnetPeer::remove_sent_reliable(uint32_t ack_seq, u
     for (size_t i = 0; i < sent_reliable_.size(); ++i) {
         const auto& s = sent_reliable_[i];
         if (s.cmd.header.reliable_seq == ack_seq && s.cmd.header.channel_id == channel_id) {
-
             const bool s_unseq = (s.cmd.header.flags == FlagValue::ReliableUnsequenced) ||
                                  (s.cmd.header.command_type == EnetCommandType::EgSendReliableUnsequenced) ||
                                  (s.cmd.header.command_type == EnetCommandType::EgSendFragmentUnsequenced);
@@ -377,9 +376,13 @@ std::optional<EnetOutCommand> EnetPeer::remove_sent_reliable(uint32_t ack_seq, u
                 continue;
 
             EnetOutCommand ret = s;
-            sent_reliable_.erase(sent_reliable_.begin() + (ptrdiff_t)i);
+            sent_reliable_.erase(sent_reliable_.begin() + static_cast<ptrdiff_t>(i));
+
             if (!sent_reliable_.empty())
                 timeout_int_ = time_int_ + 25;
+            else
+                timeout_int_ = 0;
+
             return ret;
         }
     }
@@ -413,13 +416,16 @@ void EnetPeer::handle_fragment(const EnetCommand& fragment_cmd) {
 
     EnetCommand combined = start;
     combined.set_payload(std::move(full));
-
     combined.header.reliable_seq = fragment_cmd.fragment_start_seq + fragment_cmd.fragment_count - 1;
 
     if (sequenced) {
         combined.header.command_type = EnetCommandType::SendReliable;
         combined.header.flags = FlagValue::Reliable;
-        ch.incoming_reliable[fragment_cmd.fragment_start_seq] = std::move(combined);
+
+        ch.sync_reliable_window();
+        auto res = ch.incoming_reliable.insert_or_assign(fragment_cmd.fragment_start_seq, std::move(combined));
+        if (res.out_of_window())
+            return;
     } else {
         combined.header.command_type = EnetCommandType::EgSendReliableUnsequenced;
         combined.header.flags = FlagValue::ReliableUnsequenced;
@@ -436,26 +442,36 @@ bool EnetPeer::queue_incoming_command(const EnetCommand& cmd) {
     if (reliable) {
         if (unsequenced)
             return ch.queue_incoming_reliable_unsequenced(cmd);
+
         if (cmd.header.reliable_seq <= ch.incoming_reliable_seq)
             return false;
-        if (ch.incoming_reliable.find(cmd.header.reliable_seq) != ch.incoming_reliable.end())
+
+        ch.sync_reliable_window();
+
+        if (ch.incoming_reliable.contains(cmd.header.reliable_seq))
             return false;
-        ch.incoming_reliable[cmd.header.reliable_seq] = cmd;
+
+        auto res = ch.incoming_reliable.emplace(cmd.header.reliable_seq, cmd);
+        if (res.out_of_window())
+            return false;
+
         return true;
     }
 
     // Unreliable
     if (cmd.header.flags == FlagValue::Unreliable) {
-        // Sequenced unreliable: compare against dispatched reliable/unreliable
-        if (cmd.header.reliable_seq < ch.incoming_reliable_seq)
+        if (cmd.header.reliable_seq < ch.incoming_reliable_seq || cmd.unreliable_seq <= ch.incoming_unreliable_seq)
             return true;
-        if (cmd.unreliable_seq <= ch.incoming_unreliable_seq)
-            return true;
-        if (ch.incoming_unreliable.find(cmd.unreliable_seq) != ch.incoming_unreliable.end())
+
+        ch.sync_unreliable_window();
+
+        if (ch.incoming_unreliable.contains(cmd.unreliable_seq))
             return false;
 
-        // apply LimitOfUnreliableCommands pruning later in dispatch
-        ch.incoming_unreliable[cmd.unreliable_seq] = cmd;
+        auto res = ch.incoming_unreliable.emplace(cmd.unreliable_seq, cmd);
+        if (res.out_of_window())
+            return false;
+
         return true;
     }
 
@@ -628,58 +644,78 @@ bool EnetPeer::dispatch_one() {
         }
 
         if (!ch.incoming_unreliable.empty()) {
-            // Prune excess packets, oldest first
+            ch.sync_unreliable_window();
+
+            // Prune excess packets by removing the smallest present key,
+            // not merely base_ if that slot happens to be occupied.
             if (cfg_.max_pending_unreliable_commands > 0) {
                 while ((int)ch.incoming_unreliable.size() > cfg_.max_pending_unreliable_commands) {
-                    // Remove the oldest (first) element
-                    ch.incoming_unreliable.erase(ch.incoming_unreliable.begin());
+                    bool removed = false;
+                    const uint32_t base = ch.incoming_unreliable.base_key();
+
+                    for (size_t i = 0; i < ch.incoming_unreliable.capacity(); ++i) {
+                        const uint32_t k = static_cast<uint32_t>(base + static_cast<uint32_t>(i));
+                        if (ch.incoming_unreliable.erase(k)) {
+                            removed = true;
+                            break;
+                        }
+                    }
+
+                    if (!removed)
+                        break;
                 }
             }
 
-            // Now find the best dispatch candidate (smallest key that is >= incoming_unreliable_seq and has reliable_seq <= incoming_reliable_seq)
             uint32_t best = UINT32_MAX;
-            std::vector<uint32_t> to_remove;
+            const uint32_t base = ch.incoming_unreliable.base_key();
 
-            for (auto& [k, v] : ch.incoming_unreliable) {
-                if (k < ch.incoming_unreliable_seq || v.header.reliable_seq < ch.incoming_reliable_seq) {
-                    to_remove.push_back(k);
+            for (size_t i = 0; i < ch.incoming_unreliable.capacity(); ++i) {
+                const uint32_t k = static_cast<uint32_t>(base + static_cast<uint32_t>(i));
+                auto *v = ch.incoming_unreliable.find(k);
+                if (!v)
+                    continue;
+
+                if (k <= ch.incoming_unreliable_seq || v->header.reliable_seq < ch.incoming_reliable_seq) {
+                    ch.incoming_unreliable.erase(k);
                     continue;
                 }
 
-                if (k < best && v.header.reliable_seq <= ch.incoming_reliable_seq)
+                if (v->header.reliable_seq <= ch.incoming_reliable_seq) {
                     best = k;
+                    break;
+                }
             }
-            for (auto k : to_remove)
-                ch.incoming_unreliable.erase(k);
 
             if (best != UINT32_MAX) {
-                EnetCommand& cmd = ch.incoming_unreliable[best];
+                EnetCommand cmd = std::move(*ch.incoming_unreliable.find(best));
+                ch.incoming_unreliable.erase(best);
+
                 ch.incoming_unreliable_seq = cmd.unreliable_seq;
+                ch.sync_unreliable_window();
 
                 if (on_payload_command)
                     on_payload_command(std::move(cmd));
-
-                ch.incoming_unreliable.erase(best);
                 return true;
             }
         }
 
         // Reliable in-order
-        auto it = ch.incoming_reliable.find(ch.incoming_reliable_seq + 1);
-        if (it != ch.incoming_reliable.end()) {
-            const EnetCommand& peek = it->second;
+        ch.sync_reliable_window();
 
-            if (peek.header.command_type == EnetCommandType::SendFragment || peek.header.command_type == EnetCommandType::EgSendFragmentUnsequenced)
-                // Fragment not reassembled yet, so do not dispatch anything for this channel
+        if (auto *cmd_ptr = ch.incoming_reliable.find(ch.incoming_reliable_seq + 1)) {
+            if (cmd_ptr->header.command_type == EnetCommandType::SendFragment || cmd_ptr->header.command_type == EnetCommandType::EgSendFragmentUnsequenced)
                 continue;
 
-            EnetCommand& cmd = it->second;
+            EnetCommand cmd = std::move(*cmd_ptr);
+            const uint32_t consumed_start_seq = ch.incoming_reliable_seq + 1;
+
             ch.incoming_reliable_seq = cmd.header.reliable_seq;
+            ch.incoming_reliable.erase(consumed_start_seq);
+            ch.sync_reliable_window();
 
             if (on_payload_command)
                 on_payload_command(std::move(cmd));
 
-            ch.incoming_reliable.erase(it);
             return true;
         }
     }
@@ -797,6 +833,8 @@ bool EnetPeer::flush_send_queue(bool only_acks) {
 
         if (!sent_reliable_.empty())
             timeout_int_ = time_int_ + 25;
+        else
+            timeout_int_ = 0;
     }
 
     // Ping injection
@@ -828,8 +866,6 @@ bool EnetPeer::flush_send_queue(bool only_acks) {
             if (used + 20 > mtu)
                 break;
 
-            // Reuse command parser on a fake buffer that begins with the ack header (command parser expects command header at 0)
-            // We'll just parse via manual decode:
             const DatagramView b = outgoing_ack_pool_.front();
             if (b.size() != 20) {
                 outgoing_ack_pool_.pop_front();
@@ -841,7 +877,6 @@ bool EnetPeer::flush_send_queue(bool only_acks) {
             ack.header.channel_id = b[1];
             ack.header.flags = b[2];
             ack.header.reserved = b[3];
-            // length and reliable_seq are ignored by ack semantics, but parse anyways:
             ack.header.command_length = (uint32_t)((b[4] << 24) | (b[5] << 16) | (b[6] << 8) | b[7]);
             ack.header.reliable_seq = (uint32_t)((b[8] << 24) | (b[9] << 16) | (b[10] << 8) | b[11]);
             ack.ack_received_reliable_sequence_number = (uint32_t)((b[12] << 24) | (b[13] << 16) | (b[14] << 8) | b[15]);
@@ -854,18 +889,15 @@ bool EnetPeer::flush_send_queue(bool only_acks) {
         }
 
         if (!only_acks) {
-            // outgoing commands per channel
             for (auto& chptr : channels_) {
                 EnetChannel& ch = *chptr;
 
-                // reliable first
                 while (!ch.outgoing_reliable.empty()) {
                     auto oc = ch.outgoing_reliable.front();
                     const auto length = compute_command_length(oc.cmd);
                     if (used + length > mtu)
                         break;
 
-                    // Mark as sent reliable and track for resends
                     queue_sent_reliable(oc);
 
                     cmds_to_send.push_back(std::move(oc.cmd));
@@ -876,7 +908,6 @@ bool EnetPeer::flush_send_queue(bool only_acks) {
                     has_reliable_data = true;
                 }
 
-                // unreliable
                 while (!ch.outgoing_unreliable.empty()) {
                     EnetCommand c = ch.outgoing_unreliable.front();
 
@@ -908,7 +939,6 @@ bool EnetPeer::flush_send_queue(bool only_acks) {
 
         DatagramView active_view{datagram_buf.data(), actual_len};
 
-        // Try to send datagram
         if (!send_datagram(active_view)) {
             if (has_reliable_data) {
                 datagram_queue_.push({datagram_buf, actual_len});
@@ -917,7 +947,6 @@ bool EnetPeer::flush_send_queue(bool only_acks) {
         }
     }
 
-    // No datagrams had to be queued up
     return true;
 }
 

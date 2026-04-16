@@ -13,7 +13,7 @@
 #include <utility>
 #include <vector>
 
-namespace luxon::ser {
+namespace luxon {
 template <class Key,
           class Mapped,
           class Compare = std::less<Key>,
@@ -276,4 +276,4 @@ bool operator!=(const flat_map<Key, Mapped, Compare, Container>& lhs,
                 const flat_map<Key, Mapped, Compare, Container>& rhs) {
     return !(lhs == rhs);
 }
-} // namespace luxon::ser
+} // namespace luxon

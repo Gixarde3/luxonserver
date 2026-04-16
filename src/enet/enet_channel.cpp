@@ -10,7 +10,7 @@
 
 namespace luxon {
 namespace enet {
-EnetChannel::EnetChannel(uint8_t channel) : channel_(channel) {}
+EnetChannel::EnetChannel(uint8_t channel) : incoming_reliable(1), incoming_unreliable(1), incoming_unsequenced_frags(1), channel_(channel) {}
 
 void EnetChannel::clear_all() {
     while (!outgoing_reliable.empty())
@@ -18,11 +18,11 @@ void EnetChannel::clear_all() {
     while (!outgoing_unreliable.empty())
         outgoing_unreliable.pop();
 
-    incoming_reliable.clear();
-    incoming_unreliable.clear();
+    incoming_reliable.reset(1);
+    incoming_unreliable.reset(1);
     while (!incoming_unsequenced.empty())
         incoming_unsequenced.pop();
-    incoming_unsequenced_frags.clear();
+    incoming_unsequenced_frags.reset(1);
 
     incoming_reliable_seq = 0;
     incoming_unreliable_seq = 0;
@@ -34,7 +34,17 @@ void EnetChannel::clear_all() {
     reliable_unsequenced_received.clear();
 }
 
+void EnetChannel::sync_reliable_window() { incoming_reliable.advance_to(static_cast<uint32_t>(incoming_reliable_seq + 1)); }
+
+void EnetChannel::sync_unreliable_window() { incoming_unreliable.advance_to(static_cast<uint32_t>(incoming_unreliable_seq + 1)); }
+
+void EnetChannel::sync_reliable_unsequenced_fragment_window() {
+    incoming_unsequenced_frags.advance_to(static_cast<uint32_t>(reliable_unsequenced_completely_received + 1));
+}
+
 bool EnetChannel::queue_incoming_reliable_unsequenced(const EnetCommand& cmd) {
+    sync_reliable_unsequenced_fragment_window();
+
     if (cmd.header.reliable_seq <= reliable_unsequenced_completely_received)
         return false;
     if (reliable_unsequenced_received.find(cmd.header.reliable_seq) != reliable_unsequenced_received.end())
@@ -50,26 +60,26 @@ bool EnetChannel::queue_incoming_reliable_unsequenced(const EnetCommand& cmd) {
         reliable_unsequenced_received.erase(reliable_unsequenced_completely_received);
     }
 
-    if (cmd.header.command_type == EnetCommandType::EgSendFragmentUnsequenced)
-        incoming_unsequenced_frags[cmd.header.reliable_seq] = cmd;
-    else
+    if (cmd.header.command_type == EnetCommandType::EgSendFragmentUnsequenced) {
+        auto res = incoming_unsequenced_frags.insert_or_assign(cmd.header.reliable_seq, cmd);
+        if (res.out_of_window())
+            return false;
+    } else {
         incoming_unsequenced.push(cmd);
+    }
+
+    sync_reliable_unsequenced_fragment_window();
     return true;
 }
 
 bool EnetChannel::try_get_fragment(uint32_t reliable_seq, bool sequenced, EnetCommand& out) const {
-    if (sequenced) {
-        auto it = incoming_reliable.find(reliable_seq);
-        if (it == incoming_reliable.end())
-            return false;
-        out = it->second;
+    const auto& map = sequenced ? incoming_reliable : incoming_unsequenced_frags;
+
+    if (auto *cmd_ptr = map.find(reliable_seq)) {
+        out = *cmd_ptr;
         return true;
     }
-    auto it = incoming_unsequenced_frags.find(reliable_seq);
-    if (it == incoming_unsequenced_frags.end())
-        return false;
-    out = it->second;
-    return true;
+    return false;
 }
 
 void EnetChannel::remove_fragment(uint32_t reliable_seq, bool sequenced) {
