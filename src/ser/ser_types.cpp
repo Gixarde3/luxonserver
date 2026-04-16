@@ -215,6 +215,8 @@ std::size_t ValueHash::operator()(const Value& v) const noexcept {
                     out = hash_combine(out, hash_bytes(e.data));
                 }
                 h = hash_combine(h, out);
+            } else if constexpr (std::is_same_v<T, PreSerializedValue>) {
+                h = hash_combine(h, hash_bytes(a.data));
             }
         },
         v.value);

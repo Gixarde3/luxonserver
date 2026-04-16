@@ -26,6 +26,12 @@ struct RawCustomValue {
     bool operator==(const RawCustomValue& other) const = default;
 };
 
+struct PreSerializedValue {
+    ByteArray data;
+
+    bool operator==(const PreSerializedValue& other) const = default;
+};
+
 struct Value;
 extern const Value null;
 
@@ -146,7 +152,8 @@ struct Value {
                                      std::vector<Dictionary>,        // convenience dictionary array
                                      std::vector<GenericDictionary>, // exact generic dictionary array
                                      std::vector<HashtablePtr>,      // hashtable array
-                                     std::vector<RawCustomValue>     // custom type array
+                                     std::vector<RawCustomValue>,    // custom type array
+                                     PreSerializedValue              // value that is already serialized
                                      >;
 
     VariantType value;

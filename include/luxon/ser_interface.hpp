@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ser_types.hpp"
+#include "ser_buffer.hpp"
 #include "ser_encryption.hpp"
 
 #include <memory>
@@ -15,6 +16,9 @@ public:
 
     virtual std::expected<ByteArray, Error> Serialize(const Message& message) = 0;
     virtual std::expected<Message, Error> Deserialize(std::span<const uint8_t> packet_bytes) = 0;
+
+    virtual std::expected<void, Error> EncodeValue(ByteWriter& w, const Value& v, int depth = 0) const = 0;
+    virtual std::expected<Value, Error> DecodeValue(ByteReader& r, int depth = 0) const = 0;
 
     virtual std::expected<ByteArray, Error> CreateInitEncryptionRequest();
     virtual std::expected<void, Error> HandleInitEncryptionResponse(const InternalOperationResponseMessage& response);

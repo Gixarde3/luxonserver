@@ -1050,7 +1050,7 @@ std::expected<void, Error> GpBinaryV18::encode_parameters(ByteWriter& w, const P
     w.write_u8(static_cast<uint8_t>(params.size()));
     for (const auto& [k, v] : params) {
         w.write_u8(k);
-        LUXON_TRY(encode_value(w, v, depth + 1));
+        LUXON_TRY(EncodeValue(w, v, depth + 1));
     }
 
     return {};
@@ -1064,17 +1064,17 @@ std::expected<ParameterList, Error> GpBinaryV18::decode_parameters(ByteReader& r
 
     for (uint32_t i = 0; i < count; ++i) {
         LUXON_TRY_ASSIGN(k, r.read_u8());
-        LUXON_TRY_ASSIGN(v, decode_value(r, depth + 1));
+        LUXON_TRY_ASSIGN(v, DecodeValue(r, depth + 1));
         params[k] = std::move(v);
     }
     return params;
 }
 
-std::expected<void, Error> GpBinaryV18::encode_value(ByteWriter& w, const Value& v, int depth) const {
+std::expected<void, Error> GpBinaryV18::EncodeValue(ByteWriter& w, const Value& v, int depth) const {
     if (depth > MAX_DEPTH)
         return err(Error::Code::DepthLimit, "GpBinaryV18 encode depth limit exceeded");
 
-    auto encode_typed = [this](ByteWriter& out, const Value& value, int d) { return encode_value(out, value, d); };
+    auto encode_typed = [this](ByteWriter& out, const Value& value, int d) { return EncodeValue(out, value, d); };
 
     if (v.is_null()) {
         w.write_u8(TC_Null);
@@ -1275,6 +1275,9 @@ std::expected<void, Error> GpBinaryV18::encode_value(ByteWriter& w, const Value&
             } else if constexpr (std::is_same_v<T, std::vector<RawCustomValue>>) {
                 w.write_u8(TC_CustomTypeArray);
                 return encode_custom_array_body(w, val);
+            } else if constexpr (std::is_same_v<T, PreSerializedValue>) {
+                write_byte_array(w, val.data);
+                return {};
             } else {
                 return err(Error::Code::InvalidValue, "unsupported Value alternative for GpBinaryV18");
             }
@@ -1282,11 +1285,11 @@ std::expected<void, Error> GpBinaryV18::encode_value(ByteWriter& w, const Value&
         v.value);
 }
 
-std::expected<Value, Error> GpBinaryV18::decode_value(ByteReader& r, int depth) const {
+std::expected<Value, Error> GpBinaryV18::DecodeValue(ByteReader& r, int depth) const {
     if (depth > MAX_DEPTH)
         return err(Error::Code::DepthLimit, "GpBinaryV18 decode depth limit exceeded");
 
-    auto decode_typed = [this](ByteReader& in, int d) { return decode_value(in, d); };
+    auto decode_typed = [this](ByteReader& in, int d) { return DecodeValue(in, d); };
 
     LUXON_TRY_ASSIGN(tc, r.read_u8());
 
@@ -1628,7 +1631,7 @@ std::expected<ByteArray, Error> GpBinaryV18::Serialize(const Message& message) {
                 return {};
             } else if constexpr (std::is_same_v<T, GenericValueMessage>) {
                 kind = Kind::Message;
-                LUXON_TRY(encode_value(payload, m.value, 0));
+                LUXON_TRY(EncodeValue(payload, m.value, 0));
                 return {};
             } else if constexpr (std::is_same_v<T, RawMessage>) {
                 kind = Kind::RawMessage;
@@ -1822,7 +1825,7 @@ std::expected<Message, Error> GpBinaryV18::Deserialize(std::span<const uint8_t> 
     }
 
     case Kind::Message: {
-        LUXON_TRY_ASSIGN(v, decode_value(r, 0));
+        LUXON_TRY_ASSIGN(v, DecodeValue(r, 0));
         if (r.remaining() != 0)
             return err(Error::Code::InvalidValue, "Message packet has trailing bytes");
         return Message(GenericValueMessage{.value = std::move(v)}, encrypted);

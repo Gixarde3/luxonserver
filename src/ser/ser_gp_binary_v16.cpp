@@ -82,7 +82,7 @@ std::expected<void, Error> GpBinaryV16::encode_parameters(ByteWriter& w, const P
     w.write_u16_be(static_cast<uint16_t>(params.size()));
     for (const auto& [key, value] : params) {
         w.write_u8(key);
-        auto enc = encode_value(w, value, depth + 1);
+        auto enc = EncodeValue(w, value, depth + 1);
         if (!enc)
             return std::unexpected(enc.error());
     }
@@ -107,7 +107,7 @@ std::expected<ParameterList, Error> GpBinaryV16::decode_parameters(ByteReader& r
         if (!key)
             return std::unexpected(key.error());
 
-        auto val = decode_value(r, depth + 1);
+        auto val = DecodeValue(r, depth + 1);
         if (!val)
             return std::unexpected(val.error());
 
@@ -119,7 +119,7 @@ std::expected<ParameterList, Error> GpBinaryV16::decode_parameters(ByteReader& r
 
 // -------------------- Typed values --------------------
 
-std::expected<void, Error> GpBinaryV16::encode_value(ByteWriter& w, const Value& v, int depth) const {
+std::expected<void, Error> GpBinaryV16::EncodeValue(ByteWriter& w, const Value& v, int depth) const {
     if (depth > MAX_DEPTH)
         return std::unexpected(Error{.code = Error::Code::DepthLimit, .message = "value depth limit"});
 
@@ -194,7 +194,7 @@ std::expected<void, Error> GpBinaryV16::encode_value(ByteWriter& w, const Value&
                 w.write_u8(TC_ObjectArray);
                 w.write_u16_be(static_cast<uint16_t>(a.size()));
                 for (const auto& e : a) {
-                    auto enc = encode_value(w, e, depth + 1);
+                    auto enc = EncodeValue(w, e, depth + 1);
                     if (!enc)
                         return std::unexpected(enc.error());
                 }
@@ -212,7 +212,7 @@ std::expected<void, Error> GpBinaryV16::encode_value(ByteWriter& w, const Value&
                 w.write_u16_be(static_cast<uint16_t>(a.size()));
                 for (const auto& [k, val] : a) {
                     w.write_u8(k);
-                    auto enc = encode_value(w, val, depth + 1);
+                    auto enc = EncodeValue(w, val, depth + 1);
                     if (!enc)
                         return std::unexpected(enc.error());
                 }
@@ -231,10 +231,10 @@ std::expected<void, Error> GpBinaryV16::encode_value(ByteWriter& w, const Value&
 
                 w.write_u16_be(static_cast<uint16_t>(a->size()));
                 for (const auto& [k, val] : *a) {
-                    auto ek = encode_value(w, k, depth + 1);
+                    auto ek = EncodeValue(w, k, depth + 1);
                     if (!ek)
                         return std::unexpected(ek.error());
-                    auto ev = encode_value(w, val, depth + 1);
+                    auto ev = EncodeValue(w, val, depth + 1);
                     if (!ev)
                         return std::unexpected(ev.error());
                 }
@@ -292,6 +292,9 @@ std::expected<void, Error> GpBinaryV16::encode_value(ByteWriter& w, const Value&
                     w.write_u8(TC_Double);
                     for (double x : a)
                         w.write_f64_be(x);
+
+                } else if constexpr (std::is_same_v<T, PreSerializedValue>) {
+                    w.write_bytes(a.data);
                 }
                 return {};
             } else {
@@ -301,7 +304,7 @@ std::expected<void, Error> GpBinaryV16::encode_value(ByteWriter& w, const Value&
         v.value);
 }
 
-std::expected<Value, Error> GpBinaryV16::decode_value(ByteReader& r, int depth) const {
+std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) const {
     if (depth > MAX_DEPTH)
         return std::unexpected(Error{.code = Error::Code::DepthLimit, .message = "value depth limit"});
 
@@ -426,7 +429,7 @@ std::expected<Value, Error> GpBinaryV16::decode_value(ByteReader& r, int depth) 
         ObjectArray out;
         out.reserve(*count);
         for (uint32_t i = 0; i < *count; ++i) {
-            auto v = decode_value(r, depth + 1);
+            auto v = DecodeValue(r, depth + 1);
             if (!v)
                 return std::unexpected(v.error());
             out.push_back(std::move(*v));
@@ -451,7 +454,7 @@ std::expected<Value, Error> GpBinaryV16::decode_value(ByteReader& r, int depth) 
             ObjectArray out;
             out.reserve(n);
             for (uint32_t i = 0; i < n; ++i) {
-                auto v = decode_value(r, depth + 1);
+                auto v = DecodeValue(r, depth + 1);
                 if (!v)
                     return std::unexpected(v.error());
                 out.push_back(std::move(*v));
@@ -568,7 +571,7 @@ std::expected<Value, Error> GpBinaryV16::decode_value(ByteReader& r, int depth) 
             auto key = r.read_u8();
             if (!key)
                 return std::unexpected(key.error());
-            auto val = decode_value(r, depth + 1);
+            auto val = DecodeValue(r, depth + 1);
             if (!val)
                 return std::unexpected(val.error());
             out[*key] = std::move(*val);
@@ -583,10 +586,10 @@ std::expected<Value, Error> GpBinaryV16::decode_value(ByteReader& r, int depth) 
 
         auto ht = std::make_shared<Hashtable>();
         for (uint32_t i = 0; i < *count; ++i) {
-            auto k = decode_value(r, depth + 1);
+            auto k = DecodeValue(r, depth + 1);
             if (!k)
                 return std::unexpected(k.error());
-            auto v = decode_value(r, depth + 1);
+            auto v = DecodeValue(r, depth + 1);
             if (!v)
                 return std::unexpected(v.error());
             ht->emplace(std::move(*k), std::move(*v));
@@ -713,7 +716,7 @@ std::expected<ByteArray, Error> GpBinaryV16::Serialize(const Message& message) {
                 return encode_parameters(payload, m.parameters, 0);
             } else if constexpr (std::is_same_v<T, GenericValueMessage>) {
                 kind = Kind::Message;
-                return encode_value(payload, m.value, 0);
+                return EncodeValue(payload, m.value, 0);
             } else if constexpr (std::is_same_v<T, RawMessage>) {
                 kind = Kind::RawMessage;
                 payload.write_bytes(m.bytes);
@@ -945,7 +948,7 @@ std::expected<Message, Error> GpBinaryV16::Deserialize(std::span<const uint8_t> 
     }
 
     case Kind::Message: {
-        auto v = decode_value(r, 0);
+        auto v = DecodeValue(r, 0);
         if (!v)
             return std::unexpected(v.error());
         if (r.remaining() != 0)
