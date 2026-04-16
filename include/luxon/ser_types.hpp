@@ -49,6 +49,13 @@ public:
     using flat_map<uint8_t, Value>::flat_map;
     using flat_map<uint8_t, Value>::operator[];
 
+    Dictionary();
+    ~Dictionary();
+    Dictionary(const Dictionary&);
+    Dictionary(Dictionary&&) noexcept;
+    Dictionary& operator=(const Dictionary&);
+    Dictionary& operator=(Dictionary&&) noexcept;
+
     const Value& operator[](uint8_t key) const;
 };
 
@@ -56,13 +63,19 @@ using ParameterList = Dictionary;
 
 struct JaggedArray {
     std::vector<Value> elements{};
-
-    bool operator==(const JaggedArray& other) const = default;
+    bool operator==(const JaggedArray& other) const;
 };
 
 struct GenericDictionary {
     ByteArray header{};
     std::vector<std::pair<Value, Value>> entries{};
+
+    GenericDictionary();
+    ~GenericDictionary();
+    GenericDictionary(const GenericDictionary&);
+    GenericDictionary(GenericDictionary&&) noexcept;
+    GenericDictionary& operator=(const GenericDictionary&);
+    GenericDictionary& operator=(GenericDictionary&&) noexcept;
 
     bool operator==(const GenericDictionary& other) const;
 };
@@ -85,14 +98,14 @@ struct EventMessage {
     uint8_t event_code{};
     ParameterList parameters{};
 
-    bool operator==(const EventMessage& other) const = default;
+    bool operator==(const EventMessage& other) const;
 };
 
 struct OperationRequestMessage {
     uint8_t operation_code{};
     ParameterList parameters{};
 
-    bool operator==(const OperationRequestMessage& other) const = default;
+    bool operator==(const OperationRequestMessage& other) const;
 };
 
 struct OperationResponseMessage {
@@ -101,7 +114,7 @@ struct OperationResponseMessage {
     std::optional<std::string> debug_message{};
     ParameterList parameters{};
 
-    bool operator==(const OperationResponseMessage& other) const = default;
+    bool operator==(const OperationResponseMessage& other) const;
 };
 
 struct DisconnectMessage {
@@ -163,8 +176,8 @@ struct Value {
     Value(const Value& other) = default;
     Value(Value&& other) noexcept = default;
 
-    Value& operator=(const Hashtable& other) { return *this = std::make_shared<Hashtable>(other); }
-    Value& operator=(Hashtable&& other) { return *this = std::make_shared<Hashtable>(std::move(other)); }
+    Value& operator=(const Hashtable& other);
+    Value& operator=(Hashtable&& other);
 
     Value& operator=(const Value& other) = default;
     Value& operator=(Value&& other) noexcept = default;
@@ -235,6 +248,33 @@ struct Value {
 
     bool operator==(const Value& other) const;
 };
+
+// --- Deferred Implementations (Prevents libc++ incomplete type instantiation errors) ---
+
+inline Dictionary::Dictionary() = default;
+inline Dictionary::~Dictionary() = default;
+inline Dictionary::Dictionary(const Dictionary&) = default;
+inline Dictionary::Dictionary(Dictionary&&) noexcept = default;
+inline Dictionary& Dictionary::operator=(const Dictionary&) = default;
+inline Dictionary& Dictionary::operator=(Dictionary&&) noexcept = default;
+
+inline GenericDictionary::GenericDictionary() = default;
+inline GenericDictionary::~GenericDictionary() = default;
+inline GenericDictionary::GenericDictionary(const GenericDictionary&) = default;
+inline GenericDictionary::GenericDictionary(GenericDictionary&&) noexcept = default;
+inline GenericDictionary& GenericDictionary::operator=(const GenericDictionary&) = default;
+inline GenericDictionary& GenericDictionary::operator=(GenericDictionary&&) noexcept = default;
+
+inline bool JaggedArray::operator==(const JaggedArray& other) const = default;
+inline bool GenericDictionary::operator==(const GenericDictionary& other) const = default;
+inline bool EventMessage::operator==(const EventMessage& other) const = default;
+inline bool OperationRequestMessage::operator==(const OperationRequestMessage& other) const = default;
+inline bool OperationResponseMessage::operator==(const OperationResponseMessage& other) const = default;
+
+inline Value& Value::operator=(const Hashtable& other) { return *this = std::make_shared<Hashtable>(other); }
+inline Value& Value::operator=(Hashtable&& other) { return *this = std::make_shared<Hashtable>(std::move(other)); }
+
+// --------------------------------------------------------------------------------------
 
 struct GenericValueMessage {
     Value value{};

@@ -230,6 +230,4 @@ const Value& Dictionary::operator[](uint8_t key) const {
         return null;
     return res->second;
 }
-
-bool GenericDictionary::operator==(const GenericDictionary& other) const = default;
 } // namespace luxon::ser
