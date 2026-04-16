@@ -9,6 +9,97 @@
 
 namespace luxon {
 namespace enet {
+DatagramBufferPool& DatagramBufferPool::instance() {
+    static DatagramBufferPool pool;
+    return pool;
+}
+
+DatagramBufferPool::PooledPtr DatagramBufferPool::acquire() {
+    if (!free_.empty()) {
+        DatagramBuffer *ptr = free_.back().release();
+        free_.pop_back();
+        return PooledPtr(ptr, Deleter{this});
+    }
+
+    return PooledPtr(new DatagramBuffer{}, Deleter{this});
+}
+
+void DatagramBufferPool::release(DatagramBuffer *ptr) noexcept {
+    if (free_.size() < 1024)
+        free_.emplace_back(ptr);
+    else
+        delete ptr;
+}
+
+EnetCommand::HeapBuffer& EnetCommand::HeapBuffer::operator=(const HeapBuffer& other) {
+    if (this != &other) {
+        size = other.size;
+
+        if (other.data) {
+            if (!data)
+                data = DatagramBufferPool::instance().acquire();
+            std::copy_n(other.data->begin(), size, data->begin());
+        } else {
+            data.reset();
+        }
+    }
+    return *this;
+}
+
+EnetCommand::HeapBuffer& EnetCommand::HeapBuffer::operator=(HeapBuffer&& other) noexcept {
+    if (this != &other) {
+        data = std::move(other.data);
+        size = other.size;
+        other.size = 0;
+    }
+    return *this;
+}
+
+std::span<uint8_t> EnetCommand::get_payload() {
+    if (auto *dyn = std::get_if<ByteArray>(&payload_)) {
+        return *dyn;
+    }
+    auto& stat = std::get<HeapBuffer>(payload_);
+    if (!stat.data)
+        return {};
+    return {stat.data->begin(), stat.data->begin() + stat.size};
+}
+
+std::span<const uint8_t> EnetCommand::get_payload() const {
+    if (auto *dyn = std::get_if<ByteArray>(&payload_)) {
+        return *dyn;
+    }
+    auto& stat = std::get<HeapBuffer>(payload_);
+    if (!stat.data)
+        return {};
+    return {stat.data->begin(), stat.data->begin() + stat.size};
+}
+
+size_t EnetCommand::get_payload_size() const {
+    if (auto *dyn = std::get_if<ByteArray>(&payload_)) {
+        return dyn->size();
+    }
+    return std::get<HeapBuffer>(payload_).size;
+}
+
+bool EnetCommand::is_payload_empty() const {
+    if (auto *dyn = std::get_if<ByteArray>(&payload_)) {
+        return dyn->empty();
+    }
+    return std::get<HeapBuffer>(payload_).size == 0;
+}
+
+void EnetCommand::set_payload(DatagramView payload) {
+    if (payload.size() > std::tuple_size_v<DatagramBuffer>) {
+        set_payload(ByteArray(payload.begin(), payload.end()));
+        return;
+    }
+
+    auto buffer = DatagramBufferPool::instance().acquire();
+    std::copy(payload.begin(), payload.end(), buffer->begin());
+    payload_ = HeapBuffer{std::move(buffer), payload.size()};
+}
+
 namespace {
 static inline uint16_t read_u16_be(const uint8_t *p) {
     uint16_t v;

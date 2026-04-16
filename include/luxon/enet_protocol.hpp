@@ -18,6 +18,39 @@ using ByteArray = std::vector<uint8_t>;
 using DatagramBuffer = std::array<uint8_t, 1500>;
 using DatagramView = std::span<const uint8_t>;
 
+class DatagramBufferPool {
+public:
+    struct Deleter {
+        DatagramBufferPool *pool = nullptr;
+
+        void operator()(DatagramBuffer *ptr) const noexcept {
+            if (!ptr)
+                return;
+            if (pool)
+                pool->release(ptr);
+            else
+                delete ptr;
+        }
+    };
+
+    using PooledPtr = std::unique_ptr<DatagramBuffer, Deleter>;
+
+    static DatagramBufferPool& instance();
+
+    PooledPtr acquire();
+
+private:
+    void release(DatagramBuffer *ptr) noexcept;
+
+    DatagramBufferPool() = default;
+    ~DatagramBufferPool() = default;
+
+    DatagramBufferPool(const DatagramBufferPool&) = delete;
+    DatagramBufferPool& operator=(const DatagramBufferPool&) = delete;
+
+    std::vector<std::unique_ptr<DatagramBuffer>> free_;
+};
+
 class ProtocolError : public std::runtime_error {
 public:
     using std::runtime_error::runtime_error;
@@ -107,87 +140,38 @@ struct EnetCommand {
     uint32_t fragment_offset = 0;
 
     struct HeapBuffer {
-        std::unique_ptr<DatagramBuffer> data;
+        DatagramBufferPool::PooledPtr data;
         size_t size = 0;
 
-        HeapBuffer(std::unique_ptr<DatagramBuffer>&& data, size_t size) : data(std::move(data)), size(size) {}
+        HeapBuffer() = default;
+
+        HeapBuffer(DatagramBufferPool::PooledPtr&& data, size_t size) : data(std::move(data)), size(size) {}
 
         HeapBuffer(const HeapBuffer& other) : size(other.size) {
-            if (other.data)
-                data = std::make_unique<DatagramBuffer>(*other.data);
+            if (other.data) {
+                data = DatagramBufferPool::instance().acquire();
+                std::copy_n(other.data->begin(), size, data->begin());
+            }
         }
 
-        HeapBuffer& operator=(const HeapBuffer& other) {
-            if (this != &other) {
-                size = other.size;
-                if (other.data) {
-                    data = std::make_unique<DatagramBuffer>(*other.data);
-                } else {
-                    data.reset();
-                }
-            }
-            return *this;
-        }
+        HeapBuffer& operator=(const HeapBuffer& other);
 
         HeapBuffer(HeapBuffer&& other) noexcept : data(std::move(other.data)), size(other.size) { other.size = 0; }
 
-        HeapBuffer& operator=(HeapBuffer&& other) noexcept {
-            if (this != &other) {
-                data = std::move(other.data);
-                size = other.size;
-                other.size = 0;
-            }
-            return *this;
-        }
+        HeapBuffer& operator=(HeapBuffer&& other) noexcept;
     };
 
     std::variant<ByteArray, HeapBuffer> payload_;
 
-    std::span<uint8_t> get_payload() {
-        if (auto *dyn = std::get_if<ByteArray>(&payload_)) {
-            return *dyn;
-        }
-        auto& stat = std::get<HeapBuffer>(payload_);
-        if (!stat.data)
-            return {}; // Safety check
-        return {stat.data->begin(), stat.data->begin() + stat.size};
-    }
+    std::span<uint8_t> get_payload();
 
-    std::span<const uint8_t> get_payload() const {
-        if (auto *dyn = std::get_if<ByteArray>(&payload_)) {
-            return *dyn;
-        }
-        auto& stat = std::get<HeapBuffer>(payload_);
-        if (!stat.data)
-            return {};
-        return {stat.data->begin(), stat.data->begin() + stat.size};
-    }
+    std::span<const uint8_t> get_payload() const;
 
-    size_t get_payload_size() const {
-        if (auto *dyn = std::get_if<ByteArray>(&payload_)) {
-            return dyn->size();
-        }
-        return std::get<HeapBuffer>(payload_).size;
-    }
+    size_t get_payload_size() const;
 
-    bool is_payload_empty() const {
-        if (auto *dyn = std::get_if<ByteArray>(&payload_)) {
-            return dyn->empty();
-        }
-        return std::get<HeapBuffer>(payload_).size == 0;
-    }
+    bool is_payload_empty() const;
 
-    void set_payload(DatagramView payload) {
-        // std::tuple_size_v resolves capacity of std::array at compile time
-        if (payload.size() > std::tuple_size_v<DatagramBuffer>) {
-            set_payload(ByteArray(payload.begin(), payload.end()));
-            return;
-        }
-
-        auto buffer = std::make_unique<DatagramBuffer>();
-        std::copy(payload.begin(), payload.end(), buffer->begin());
-        payload_ = HeapBuffer{std::move(buffer), payload.size()};
-    }
+    void set_payload(DatagramView payload);
 
     void set_payload(ByteArray payload) { payload_ = std::move(payload); }
 
