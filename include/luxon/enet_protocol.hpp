@@ -150,7 +150,7 @@ struct EnetCommand {
         HeapBuffer(const HeapBuffer& other) : size(other.size) {
             if (other.data) {
                 data = DatagramBufferPool::instance().acquire();
-                std::copy_n(other.data->begin(), size, data->begin());
+                std::copy(other.data->begin(), other.data->begin() + size, data->begin());
             }
         }
 

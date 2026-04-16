@@ -38,7 +38,7 @@ EnetCommand::HeapBuffer& EnetCommand::HeapBuffer::operator=(const HeapBuffer& ot
         if (other.data) {
             if (!data)
                 data = DatagramBufferPool::instance().acquire();
-            std::copy_n(other.data->begin(), size, data->begin());
+            std::copy(other.data->begin(), other.data->begin() + size, data->begin());
         } else {
             data.reset();
         }
