@@ -6,6 +6,7 @@
 #include "ser_types.hpp"
 #include "ser_buffer.hpp"
 #include "ser_encryption.hpp"
+#include "ser_protocol_id.hpp"
 
 #include <memory>
 
@@ -13,6 +14,8 @@ namespace luxon::ser {
 class IProtocol {
 public:
     virtual ~IProtocol() = default;
+
+    virtual ProtocolImplID GetProtcolImplID() = 0;
 
     virtual std::expected<ByteArray, Error> Serialize(const Message& message) = 0;
     virtual std::expected<Message, Error> Deserialize(std::span<const uint8_t> packet_bytes) = 0;

@@ -12,6 +12,8 @@ public:
     GpBinaryV16() = default;
     ~GpBinaryV16() override = default;
 
+    ProtocolImplID GetProtcolImplID() override { return ProtocolImplID::GpBinaryV16; }
+
     std::expected<ByteArray, Error> Serialize(const Message& message) override;
     std::expected<Message, Error> Deserialize(std::span<const uint8_t> packet_bytes) override;
 
