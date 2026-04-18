@@ -73,9 +73,9 @@ bool EnetChannel::queue_incoming_reliable_unsequenced(const EnetCommand& cmd) {
 }
 
 bool EnetChannel::try_get_fragment(uint32_t reliable_seq, bool sequenced, EnetCommand& out) const {
-    const auto& map = sequenced ? incoming_reliable : incoming_unsequenced_frags;
+    const auto *cmd_ptr = sequenced ? incoming_reliable.find(reliable_seq) : incoming_unsequenced_frags.find(reliable_seq);
 
-    if (auto *cmd_ptr = map.find(reliable_seq)) {
+    if (cmd_ptr) {
         out = *cmd_ptr;
         return true;
     }

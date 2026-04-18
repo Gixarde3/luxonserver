@@ -427,8 +427,11 @@ void EnetPeer::handle_fragment(const EnetCommand& fragment_cmd) {
 
         ch.sync_reliable_window();
         auto res = ch.incoming_reliable.insert_or_assign(fragment_cmd.fragment_start_seq, std::move(combined));
-        if (res.out_of_window())
+        if (res.out_of_window()) {
+            if (on_log_message)
+                on_log_message(LogLevel::Error, "Receive window `incoming_reliable` is too small! Dropping reliable packet!");
             return;
+        }
     } else {
         combined.header.command_type = EnetCommandType::EgSendReliableUnsequenced;
         combined.header.flags = FlagValue::ReliableUnsequenced;
@@ -455,8 +458,11 @@ bool EnetPeer::queue_incoming_command(const EnetCommand& cmd) {
             return false;
 
         auto res = ch.incoming_reliable.emplace(cmd.header.reliable_seq, cmd);
-        if (res.out_of_window())
+        if (res.out_of_window()) {
+            if (on_log_message)
+                on_log_message(LogLevel::Error, "Receive window `incoming_reliable` is too small! Dropping reliable packet!");
             return false;
+        }
 
         return true;
     }
@@ -472,8 +478,11 @@ bool EnetPeer::queue_incoming_command(const EnetCommand& cmd) {
             return false;
 
         auto res = ch.incoming_unreliable.emplace(cmd.unreliable_seq, cmd);
-        if (res.out_of_window())
+        if (res.out_of_window()) {
+            if (on_log_message)
+                on_log_message(LogLevel::Warning, "Receive window `incoming_unreliable` is too small! Dropping unreliable packet!");
             return false;
+        }
 
         return true;
     }

@@ -31,6 +31,8 @@
 
 namespace luxon {
 namespace enet {
+enum class LogLevel { Warning, Error };
+
 enum class EnetConnectionState { Disconnected, Connecting, Connected, Disconnecting, Stale };
 
 enum class EnetDeliveryMode { Unreliable, Reliable, UnreliableUnsequenced, ReliableUnsequenced };
@@ -149,10 +151,10 @@ public:
     std::queue<EnetCommand> outgoing_unreliable;
 
     // incoming storage
-    sliding_flat_map<uint32_t, EnetCommand, 1024> incoming_reliable;          // by reliable_seq
-    sliding_flat_map<uint32_t, EnetCommand, 1024> incoming_unreliable;        // by unreliable_seq
+    sliding_flat_map<uint32_t, EnetCommand, 128> incoming_reliable;           // by reliable_seq
+    sliding_flat_map<uint32_t, EnetCommand, 256> incoming_unreliable;         // by unreliable_seq
     std::queue<EnetCommand> incoming_unsequenced;                             // ready to dispatch (also reassembled frags)
-    sliding_flat_map<uint32_t, EnetCommand, 1024> incoming_unsequenced_frags; // reliable_seq -> fragment cmd for unsequenced fragments
+    sliding_flat_map<uint32_t, EnetCommand, 64> incoming_unsequenced_frags;   // reliable_seq -> fragment cmd for unsequenced fragments
 
     // seq numbers
     uint32_t incoming_reliable_seq = 0;
@@ -213,9 +215,11 @@ public:
     // Callbacks (optional)
     std::function<void(EnetConnectionState)> on_state_changed;
     std::function<void(EnetCommand&&)> on_payload_command;
+    std::function<void(LogLevel, std::string_view)> on_log_message;
     void reset_callbacks() {
         on_state_changed = nullptr;
         on_payload_command = nullptr;
+        on_log_message = nullptr;
     }
 
     // Stats
