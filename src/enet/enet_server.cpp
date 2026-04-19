@@ -2,13 +2,24 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "enet_peer.hpp"
+#include "enet_metrics_macros.hpp"
 
 #include <array>
 #include <span>
 
 namespace luxon {
 namespace enet {
-EnetServer::EnetServer(EnetPeerConfig cfg) : cfg_(cfg) {
+EnetServer::EnetServer(EnetPeerConfig cfg
+#ifdef LUXON_ENET_ENABLE_METRICS
+                       ,
+                       Metrics& metrics
+#endif
+                       )
+    :
+#ifdef LUXON_ENET_ENABLE_METRICS
+      metrics_(metrics),
+#endif
+      cfg_(cfg) {
     if (!cfg_.time_base)
         cfg_.time_base = EnetPeer::create_time_base();
 }
@@ -17,6 +28,7 @@ bool EnetServer::bind(uint16_t port, bool ipv6) {
     if (!sock_.bind_any(port, ipv6))
         return false;
     sock_.set_nonblocking(true);
+
     return true;
 }
 
@@ -54,12 +66,17 @@ void EnetServer::service_self() {
 
         DatagramView datagram(buf.begin(), buf.begin() + r);
 
+        // Update metrics
+        ENET_METRIC_ADD(udp.datagrams_in, 1);
+        ENET_METRIC_ADD(global.bytes_in, r);
+
         // Parse header to find challenge/peer id, etc.
         EnetPacketHeader hdr;
         std::vector<EnetCommand> cmds;
         try {
             cmds = parse_packet(datagram, hdr);
         } catch (...) {
+            ENET_METRIC_ADD(enet.datagram_validation_failures, 1);
             continue;
         }
 
@@ -81,7 +98,12 @@ void EnetServer::service_self() {
             peer_cfg.apply_connect_command(*connect_cmd);
 
             const int16_t assigned = next_peer_id_++;
-            auto peer = std::make_shared<EnetPeer>(peer_cfg);
+            auto peer = std::make_shared<EnetPeer>(peer_cfg
+#ifdef LUXON_ENET_ENABLE_METRICS
+                                                   ,
+                                                   metrics_
+#endif
+            );
             peer->attach_server_side(sock_, from, assigned, hdr.challenge);
 
             peers_by_ep_[from] = peer;
@@ -94,9 +116,9 @@ void EnetServer::service_self() {
             };
 
             // Feed the connect packet into the peer as well (so it acks, etc.)
-            peer->handle_incoming_datagram(datagram);
+            peer->handle_incoming_packet(hdr, cmds, datagram.size());
         } else {
-            itp->second->handle_incoming_datagram(datagram);
+            itp->second->handle_incoming_packet(hdr, cmds, datagram.size());
 
             // Make sure disconnected peer is no longer serviced, ever again
             if (itp->second->state() == EnetConnectionState::Disconnected)

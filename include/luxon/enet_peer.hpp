@@ -5,6 +5,9 @@
 
 #include "enet_protocol.hpp"
 #include "sliding_flat_map.hpp"
+#ifdef LUXON_ENET_ENABLE_METRICS
+#include "enet_metrics.hpp"
+#endif
 
 #include <vector>
 #include <array>
@@ -170,7 +173,6 @@ public:
     bool queue_incoming_reliable_unsequenced(const EnetCommand& cmd);
     bool try_get_fragment(uint32_t reliable_seq, bool sequenced, EnetCommand& out) const;
     void remove_fragment(uint32_t reliable_seq, bool sequenced);
-    void clear_all();
 
     void sync_reliable_window();
     void sync_unreliable_window();
@@ -183,7 +185,13 @@ private:
 // A single peer (client-side or server-side) speaking ENet
 class EnetPeer {
 public:
-    explicit EnetPeer(EnetPeerConfig cfg);
+    explicit EnetPeer(EnetPeerConfig cfg
+#ifdef LUXON_ENET_ENABLE_METRICS
+                      ,
+                      Metrics& metrics
+#endif
+    );
+    ~EnetPeer();
 
     // Client mode
     bool use(UdpSocket& sock);
@@ -206,7 +214,11 @@ public:
 
     // Feed datagrams received from socket. This parses, checks challenge, handles ACKs, handles sequencing and fragmentation
     // and queues payloads for dispatch
-    void handle_incoming_datagram(std::span<const uint8_t> datagram);
+    void handle_incoming_datagram(std::span<const uint8_t> datagram, bool count_io_metrics = true);
+
+    // Feed packet received from socket. This checks challenge, handles ACKs, handles sequencing and fragmentation
+    // and queues payloads for dispatch
+    void handle_incoming_packet(const EnetPacketHeader& hdr, std::span<EnetCommand> cmds, size_t datagram_size);
 
     // Dispatch exactly ONE queued incoming payload command
     // Returns true if something was dispatched
@@ -239,6 +251,8 @@ public:
     void sync_local_time_to_remote_dynamic(const EnetPeer& remote);
 
 private:
+    void set_state(EnetConnectionState new_state);
+
     // Core protocol helpers
     void send_connect();
     int now_ms() const;
@@ -279,6 +293,10 @@ private:
     bool send_datagram(DatagramView datagram);
 
 private:
+#ifdef LUXON_ENET_ENABLE_METRICS
+    Metrics& metrics_;
+#endif
+
     EnetPeerConfig cfg_;
     UdpSocket *sock_ = nullptr;
 
@@ -344,7 +362,12 @@ private:
 // Server that accepts peers and routes datagrams to them
 class EnetServer {
 public:
-    explicit EnetServer(EnetPeerConfig cfg);
+    explicit EnetServer(EnetPeerConfig cfg
+#ifdef LUXON_ENET_ENABLE_METRICS
+                        ,
+                        Metrics& metrics
+#endif
+    );
 
     bool bind(uint16_t port, bool ipv6 = false);
     void service() {
@@ -364,6 +387,10 @@ public:
     SocketType native_handle() const { return sock_.native_handle(); }
 
 private:
+#ifdef LUXON_ENET_ENABLE_METRICS
+    Metrics& metrics_;
+#endif
+
     EnetPeerConfig cfg_;
     UdpSocket sock_;
 

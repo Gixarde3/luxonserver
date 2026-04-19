@@ -111,6 +111,7 @@ target_include_directories(luxon_ser
 # luxon_enet library
 add_library(luxon_enet
     include/luxon/enet_peer.hpp
+    include/luxon/enet_metrics.hpp include/luxon/enet_metrics_macros.hpp
 
     include/luxon/enet_protocol.hpp src/enet/enet_protocol.cpp
     src/enet/enet_endpoint.cpp
@@ -132,6 +133,11 @@ target_include_directories(luxon_enet
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include/luxon
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+
+option(LUXON_ENET_ENABLE_METRICS "Collect performance metrics in Luxon Enet" OFF)
+if (LUXON_ENET_ENABLE_METRICS)
+    target_compile_definitions(luxon_enet PUBLIC LUXON_ENET_ENABLE_METRICS)
+endif()
 
 if(HAS_PTON)
     target_compile_definitions(luxon_enet PUBLIC LUXON_ENET_HAS_PTON PRIVATE HAS_PTON)

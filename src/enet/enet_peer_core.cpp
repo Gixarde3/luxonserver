@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "enet_peer.hpp"
+#include "enet_metrics_macros.hpp"
 
 #include <bit>
 #include <random>
@@ -34,7 +35,17 @@ EnetDeliveryMode FlagsToEnetDeliveryMode(uint8_t flags) {
     }
 }
 
-EnetPeer::EnetPeer(EnetPeerConfig cfg) : cfg_(cfg) {
+EnetPeer::EnetPeer(EnetPeerConfig cfg
+#ifdef LUXON_ENET_ENABLE_METRICS
+                   ,
+                   Metrics& metrics
+#endif
+                   )
+    :
+#ifdef LUXON_ENET_ENABLE_METRICS
+      metrics_(metrics),
+#endif
+      cfg_(cfg) {
     if (cfg.time_base)
         time_base_ = cfg.time_base;
     else
@@ -49,6 +60,16 @@ EnetPeer::EnetPeer(EnetPeerConfig cfg) : cfg_(cfg) {
     sent_reliable_.reserve(100);
 
     cfg.mtu = std::min<size_t>(cfg.mtu, std::tuple_size_v<DatagramBuffer>);
+
+    ENET_METRIC_ADD(global.peers, 1);
+}
+
+EnetPeer::~EnetPeer() {
+    ENET_METRIC_SUB(global.peers, 1);
+
+    // Don't leak active connection if destroyed abruptly
+    if (state_ == EnetConnectionState::Connected)
+        ENET_METRIC_SUB(global.connections_active, 1);
 }
 
 bool EnetPeer::use(UdpSocket& sock) {
@@ -58,9 +79,7 @@ bool EnetPeer::use(UdpSocket& sock) {
     sock_ = &sock;
     remote_.reset();
 
-    state_ = EnetConnectionState::Connecting;
-    if (on_state_changed)
-        on_state_changed(state_);
+    set_state(EnetConnectionState::Connecting);
 
     send_connect();
 
@@ -80,9 +99,7 @@ bool EnetPeer::connect(UdpSocket& sock, const std::string& host, uint16_t port) 
 
     sock_->set_nonblocking(true);
 
-    state_ = EnetConnectionState::Connecting;
-    if (on_state_changed)
-        on_state_changed(state_);
+    set_state(EnetConnectionState::Connecting);
 
     send_connect();
 
@@ -98,9 +115,7 @@ void EnetPeer::attach_server_side(UdpSocket& sock, const EnetEndpoint& remote, i
 
     sock_->set_nonblocking(true);
 
-    state_ = EnetConnectionState::Connecting;
-    if (on_state_changed)
-        on_state_changed(state_);
+    set_state(EnetConnectionState::Connecting);
 
     // Server should respond to a new connect with VerifyConnect
     EnetOutCommand oc;
@@ -121,9 +136,11 @@ void EnetPeer::attach_server_side(UdpSocket& sock, const EnetEndpoint& remote, i
 void EnetPeer::disconnect(bool noflush) {
     if (state_ == EnetConnectionState::Disconnected || state_ == EnetConnectionState::Disconnecting)
         return;
-    state_ = EnetConnectionState::Disconnecting;
-    if (on_state_changed)
-        on_state_changed(state_);
+
+    if (state_ != EnetConnectionState::Stale)
+        ENET_METRIC_ADD(global.disconnected_peers_s, 1);
+
+    set_state(EnetConnectionState::Disconnecting);
 
     EnetOutCommand oc;
     oc.cmd.header.command_type = EnetCommandType::Disconnect;
@@ -135,9 +152,7 @@ void EnetPeer::disconnect(bool noflush) {
         flush_send_queue(false);
 
     // Close is done by owner of socket, transition to Disconnected after send
-    state_ = EnetConnectionState::Disconnected;
-    if (on_state_changed)
-        on_state_changed(state_);
+    set_state(EnetConnectionState::Disconnected);
     reset_callbacks();
 }
 
@@ -250,6 +265,9 @@ bool EnetPeer::send_payload(DatagramView payload, const EnetSendOptions& opt) {
         queue_outgoing_reliable(std::move(oc));
     }
 
+    // Update metrics
+    ENET_METRIC_ADD(global.messages_out, 1);
+
     return true;
 }
 
@@ -296,6 +314,10 @@ void EnetPeer::queue_outgoing_ack(const EnetCommand& received_reliable_cmd, uint
     if (position != buf.size())
         throw std::runtime_error("ACK serialization size mismatch");
     outgoing_ack_pool_.push_back(buf);
+
+    // Update metrics
+    ENET_METRIC_ADD(enet.acknowledgements_out, 1);
+    ENET_METRIC_ADD(enet.commands_out, 1);
 }
 
 void EnetPeer::queue_sent_reliable(EnetOutCommand& outcmd) {
@@ -329,6 +351,9 @@ void EnetPeer::queue_outgoing_reliable(EnetOutCommand outcmd) {
             outcmd.cmd.header.reliable_seq = ++ch.outgoing_reliable_seq;
     }
     ch.outgoing_reliable.push(std::move(outcmd));
+
+    ENET_METRIC_ADD(enet.reliable_commands_out, 1);
+    ENET_METRIC_ADD(enet.commands_out, 1);
 }
 
 void EnetPeer::queue_outgoing_unreliable(EnetCommand cmd) {
@@ -344,6 +369,9 @@ void EnetPeer::queue_outgoing_unreliable(EnetCommand cmd) {
     }
 
     ch.outgoing_unreliable.push(std::move(cmd));
+
+    ENET_METRIC_ADD(enet.unreliable_commands_out, 1);
+    ENET_METRIC_ADD(enet.commands_out, 1);
 }
 
 bool EnetPeer::are_reliable_commands_in_transit() const {
@@ -428,6 +456,7 @@ void EnetPeer::handle_fragment(const EnetCommand& fragment_cmd) {
         ch.sync_reliable_window();
         auto res = ch.incoming_reliable.insert_or_assign(fragment_cmd.fragment_start_seq, std::move(combined));
         if (res.out_of_window()) {
+            ENET_METRIC_ADD(enet.reliable_commands_in_dropped, 1);
             if (on_log_message)
                 on_log_message(LogLevel::Error, "Receive window `incoming_reliable` is too small! Dropping reliable packet!");
             return;
@@ -459,6 +488,7 @@ bool EnetPeer::queue_incoming_command(const EnetCommand& cmd) {
 
         auto res = ch.incoming_reliable.emplace(cmd.header.reliable_seq, cmd);
         if (res.out_of_window()) {
+            ENET_METRIC_ADD(enet.reliable_commands_in_dropped, 1);
             if (on_log_message)
                 on_log_message(LogLevel::Error, "Receive window `incoming_reliable` is too small! Dropping reliable packet!");
             return false;
@@ -479,6 +509,7 @@ bool EnetPeer::queue_incoming_command(const EnetCommand& cmd) {
 
         auto res = ch.incoming_unreliable.emplace(cmd.unreliable_seq, cmd);
         if (res.out_of_window()) {
+            ENET_METRIC_ADD(enet.unreliable_commands_in_dropped, 1);
             if (on_log_message)
                 on_log_message(LogLevel::Warning, "Receive window `incoming_unreliable` is too small! Dropping unreliable packet!");
             return false;
@@ -510,6 +541,8 @@ bool EnetPeer::queue_incoming_command(const EnetCommand& cmd) {
 }
 
 void EnetPeer::execute_command(const EnetCommand& cmd) {
+    ENET_METRIC_ADD(enet.commands_in, 1);
+
     switch (cmd.header.command_type) {
     case EnetCommandType::Acknowledge:
     case EnetCommandType::EgAcknowledgeUnsequenced: {
@@ -521,17 +554,16 @@ void EnetPeer::execute_command(const EnetCommand& cmd) {
         const bool is_unseq_ack = (cmd.header.command_type == EnetCommandType::EgAcknowledgeUnsequenced);
         auto sent = remove_sent_reliable(cmd.ack_received_reliable_sequence_number, cmd.header.channel_id, is_unseq_ack);
         if (sent) {
-            if (sent->cmd.header.command_type == EnetCommandType::VerifyConnect && state_ == EnetConnectionState::Connecting) {
-                state_ = EnetConnectionState::Connected;
-                if (on_state_changed)
-                    on_state_changed(state_);
-            }
+            if (sent->cmd.header.command_type == EnetCommandType::VerifyConnect && state_ == EnetConnectionState::Connecting)
+                set_state(EnetConnectionState::Connected);
 
             if (sent->cmd.header.command_type == EnetCommandType::Connect)
                 rtt_ = last_rtt_;
             else
                 update_rtt(last_rtt_);
         }
+
+        ENET_METRIC_ADD(enet.acknowledgements_in, 1);
         break;
     }
 
@@ -543,36 +575,47 @@ void EnetPeer::execute_command(const EnetCommand& cmd) {
             if (peer_id_ == -1 || peer_id_ == -2)
                 peer_id_ = pid;
 
-            state_ = EnetConnectionState::Connected;
-            if (on_state_changed)
-                on_state_changed(state_);
+            set_state(EnetConnectionState::Connected);
         }
         break;
     }
 
     case EnetCommandType::Disconnect: {
+        ENET_METRIC_ADD(global.disconnected_peers_c, 1);
+
         // Make sure disconnect command is still acknowledged
         flush_send_queue(true);
 
-        state_ = EnetConnectionState::Disconnected;
-        if (on_state_changed)
-            on_state_changed(state_);
+        set_state(EnetConnectionState::Disconnected);
         reset_callbacks();
         break;
     }
 
-    case EnetCommandType::Ping:
+    case EnetCommandType::Ping: {
+        ENET_METRIC_ADD(enet.pings_in, 1);
+
         // Does nothing, ping is always reliable so will ACK in response
         break;
+    }
 
     case EnetCommandType::SendReliable:
-    case EnetCommandType::EgSendReliableUnsequenced:
+    case EnetCommandType::EgSendReliableUnsequenced: {
+        ENET_METRIC_ADD(enet.reliable_commands_in, 1);
+
+        if (state_ == EnetConnectionState::Connected) {
+            if (!queue_incoming_command(cmd))
+                ENET_METRIC_ADD(enet.reliable_commands_in_dropped, 1);
+        }
+        break;
+    }
+
     case EnetCommandType::SendUnreliable:
     case EnetCommandType::SendUnreliableUnsequenced: {
+        ENET_METRIC_ADD(enet.unreliable_commands_in, 1);
+
         if (state_ == EnetConnectionState::Connected) {
-            if (queue_incoming_command(cmd)) {
-                // If reliable, will be acked in handle_incoming_datagram
-            }
+            if (!queue_incoming_command(cmd))
+                ENET_METRIC_ADD(enet.unreliable_commands_in_dropped, 1);
         }
         break;
     }
@@ -587,8 +630,11 @@ void EnetPeer::execute_command(const EnetCommand& cmd) {
                 break;
             }
 
-            if (queue_incoming_command(cmd))
+            if (queue_incoming_command(cmd)) {
                 handle_fragment(cmd);
+            } else {
+                ENET_METRIC_ADD(enet.reliable_commands_in_dropped, 1);
+            }
         }
         break;
     }
@@ -599,12 +645,35 @@ void EnetPeer::execute_command(const EnetCommand& cmd) {
     }
 }
 
-void EnetPeer::handle_incoming_datagram(std::span<const uint8_t> datagram) {
-    try {
-        EnetPacketHeader hdr;
-        std::vector<EnetCommand> cmds = parse_packet(datagram, hdr);
+void EnetPeer::handle_incoming_datagram(std::span<const uint8_t> datagram, bool count_io_metrics) {
+    EnetPacketHeader hdr;
+    std::vector<EnetCommand> cmds;
 
-        bytes_in_ += datagram.size();
+    try {
+        cmds = parse_packet(datagram, hdr);
+
+        // Update metrics
+        if (count_io_metrics) {
+            ENET_METRIC_ADD(udp.datagrams_in, 1);
+            ENET_METRIC_ADD(global.bytes_in, datagram.size());
+        }
+    } catch (const CRCError&) {
+        ENET_METRIC_ADD(enet.datagram_validation_failures, 1);
+        packet_loss_by_crc_++;
+        return;
+    } catch (const ProtocolError&) {
+        ENET_METRIC_ADD(enet.datagram_validation_failures, 1);
+        // TODO: Handle this somehow, maybe?
+        return;
+    }
+
+    // Handle packet
+    handle_incoming_packet(hdr, cmds, datagram.size());
+}
+
+void EnetPeer::handle_incoming_packet(const EnetPacketHeader& hdr, std::span<EnetCommand> cmds, size_t datagram_size) {
+    try {
+        bytes_in_ += datagram_size;
 
         // Challenge check (plain or encrypted)
         if (hdr.challenge != challenge_) {
@@ -629,9 +698,9 @@ void EnetPeer::handle_incoming_datagram(std::span<const uint8_t> datagram) {
                 execute_command(c);
             }
         }
-    } catch (const CRCError&) {
-        packet_loss_by_crc_++;
     } catch (const ProtocolError&) {
+        ENET_METRIC_ADD(enet.datagram_validation_failures, 1);
+
         // TODO: Handle this somehow, maybe?
     }
 }
@@ -647,6 +716,8 @@ bool EnetPeer::dispatch_one() {
 
         if (!ch.incoming_unsequenced.empty()) {
             EnetCommand& cmd = ch.incoming_unsequenced.front();
+
+            ENET_METRIC_ADD(global.messages_in, 1);
 
             if (on_payload_command)
                 on_payload_command(std::move(cmd));
@@ -668,6 +739,7 @@ bool EnetPeer::dispatch_one() {
                     for (size_t i = 0; i < ch.incoming_unreliable.capacity(); ++i) {
                         const uint32_t k = static_cast<uint32_t>(base + static_cast<uint32_t>(i));
                         if (ch.incoming_unreliable.erase(k)) {
+                            ENET_METRIC_ADD(enet.unreliable_commands_in_dropped, 1);
                             removed = true;
                             break;
                         }
@@ -689,6 +761,7 @@ bool EnetPeer::dispatch_one() {
 
                 if (k <= ch.incoming_unreliable_seq || v->header.reliable_seq < ch.incoming_reliable_seq) {
                     ch.incoming_unreliable.erase(k);
+                    ENET_METRIC_ADD(enet.unreliable_commands_in_dropped, 1);
                     continue;
                 }
 
@@ -704,6 +777,8 @@ bool EnetPeer::dispatch_one() {
 
                 ch.incoming_unreliable_seq = cmd.unreliable_seq;
                 ch.sync_unreliable_window();
+
+                ENET_METRIC_ADD(global.messages_in, 1);
 
                 if (on_payload_command)
                     on_payload_command(std::move(cmd));
@@ -724,6 +799,8 @@ bool EnetPeer::dispatch_one() {
             ch.incoming_reliable_seq = cmd.header.reliable_seq;
             ch.incoming_reliable.erase(consumed_start_seq);
             ch.sync_reliable_window();
+
+            ENET_METRIC_ADD(global.messages_in, 1);
 
             if (on_payload_command)
                 on_payload_command(std::move(cmd));
@@ -761,6 +838,26 @@ void EnetPeer::sync_local_time_to_remote_dynamic(const EnetPeer& remote) {
         cmd.command_sent_time += time_diff;
         cmd.timeout_time += time_diff;
     }
+}
+
+void EnetPeer::set_state(EnetConnectionState new_state) {
+    if (state_ == new_state)
+        return;
+
+    const bool was_active = (state_ == EnetConnectionState::Connected);
+    const bool is_active = (new_state == EnetConnectionState::Connected);
+
+    if (was_active && !is_active)
+        ENET_METRIC_SUB(global.connections_active, 1);
+    else if (!was_active && is_active)
+        ENET_METRIC_ADD(global.connections_active, 1);
+
+    if (new_state == EnetConnectionState::Disconnected)
+        ENET_METRIC_ADD(global.disconnected_peers, 1);
+
+    state_ = new_state;
+    if (on_state_changed)
+        on_state_changed(state_);
 }
 
 void EnetPeer::send_connect() {
@@ -819,9 +916,10 @@ bool EnetPeer::flush_send_queue(bool only_acks) {
             auto& s = sent_reliable_[i];
             if (s.round_trip_timeout != 0 && (time_int_ - s.command_sent_time) > s.round_trip_timeout) {
                 if (s.command_sent_count > cfg_.max_resends || time_int_ > s.timeout_time) {
-                    state_ = EnetConnectionState::Stale;
-                    if (on_state_changed)
-                        on_state_changed(state_);
+                    ENET_METRIC_ADD(enet.timeout_disconnects, 1);
+                    ENET_METRIC_ADD(global.disconnected_peers_t, 1);
+
+                    set_state(EnetConnectionState::Stale);
                     disconnect(true);
                     return true;
                 }
@@ -840,8 +938,10 @@ bool EnetPeer::flush_send_queue(bool only_acks) {
         }
 
         // Re-queue in the correct chronological (FIFO) order
-        for (auto it = extracted.rbegin(); it != extracted.rend(); ++it)
+        for (auto it = extracted.rbegin(); it != extracted.rend(); ++it) {
             queue_outgoing_reliable(std::move(*it));
+            ENET_METRIC_ADD(enet.reliable_commands_out_resent, 1);
+        }
 
         if (!sent_reliable_.empty())
             timeout_int_ = time_int_ + 25;
@@ -858,6 +958,8 @@ bool EnetPeer::flush_send_queue(bool only_acks) {
         ping.cmd.header.channel_id = ControlChannel;
         ping.cmd.header.flags = FlagValue::Reliable;
         queue_outgoing_reliable(std::move(ping));
+
+        ENET_METRIC_ADD(enet.pings_out, 1);
     }
 
     // Keep building as many datagrams as we can
@@ -938,6 +1040,7 @@ bool EnetPeer::flush_send_queue(bool only_acks) {
         if (cmds_to_send.empty())
             break;
 
+        // Create header
         EnetPacketHeader hdr;
         hdr.peer_id = peer_id_;
         hdr.type = cfg_.crc_enabled ? EnetUdpHeaderType::PlainWithCrc : EnetUdpHeaderType::PlainNoCrc;
@@ -945,16 +1048,24 @@ bool EnetPeer::flush_send_queue(bool only_acks) {
         hdr.sent_time = (uint32_t)time_int_;
         hdr.challenge = challenge_;
 
+        // Create datagram
         DatagramBuffer datagram_buf;
         size_t actual_len = create_packet(datagram_buf, hdr, cmds_to_send);
         bytes_out_ += actual_len;
 
+        // Update metrics
+        ENET_METRIC_ADD(udp.datagrams_out, 1);
+        ENET_METRIC_ADD(global.bytes_out, actual_len);
+
+        // Send datagram or queue it
         DatagramView active_view{datagram_buf.data(), actual_len};
 
         if (!send_datagram(active_view)) {
             if (has_reliable_data) {
                 datagram_queue_.push({datagram_buf, actual_len});
                 return false;
+            } else {
+                ENET_METRIC_ADD(enet.commands_out_throttled, outgoing_command_count_);
             }
         }
     }
