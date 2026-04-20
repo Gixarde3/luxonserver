@@ -55,6 +55,14 @@ void EnetServer::remove_peer(std::shared_ptr<EnetPeer> peer) {
     }
 }
 
+bool EnetServer::request_stun_binding(const char *server_hostname, uint16_t server_port) {
+    const auto ep_opt = sock_.lookup_hostname(server_hostname, server_port);
+    if (!sock_.send_stun_binding_request(*ep_opt))
+        return false;
+    stun_ep_ = *ep_opt;
+    return true;
+}
+
 void EnetServer::service_self() {
     // Poll socket
     DatagramBuffer buf;
@@ -69,6 +77,15 @@ void EnetServer::service_self() {
         // Update metrics
         ENET_METRIC_ADD(udp.datagrams_in, 1);
         ENET_METRIC_ADD(global.bytes_in, r);
+
+        // Handle STUN response
+        if (stun_ep_ == from) {
+            if (auto ep_opt = sock_.parse_stun_binding_response(datagram)) {
+                on_stun_bind(std::move(*ep_opt));
+                stun_ep_ = {};
+            }
+            return;
+        }
 
         // Parse header to find challenge/peer id, etc.
         EnetPacketHeader hdr;

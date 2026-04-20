@@ -4,6 +4,8 @@
 #include "enet_peer.hpp"
 
 #include <cstring>
+#include <random>
+#include <algorithm>
 #ifndef _WIN32
 #include <sys/socket.h>
 #endif
@@ -13,6 +15,99 @@
 
 namespace luxon {
 namespace enet {
+namespace {
+constexpr uint32_t kStunMagicCookie = 0x2112A442u;
+constexpr uint16_t kStunBindingRequest = 0x0001u;
+constexpr uint16_t kStunBindingSuccessResponse = 0x0101u;
+constexpr uint16_t kStunAttrMappedAddress = 0x0001u;
+constexpr uint16_t kStunAttrXorMappedAddress = 0x0020u;
+
+inline uint16_t read_be16(const uint8_t *p) { return static_cast<uint16_t>((static_cast<uint16_t>(p[0]) << 8) | static_cast<uint16_t>(p[1])); }
+
+inline uint32_t read_be32(const uint8_t *p) {
+    return (static_cast<uint32_t>(p[0]) << 24) | (static_cast<uint32_t>(p[1]) << 16) | (static_cast<uint32_t>(p[2]) << 8) | static_cast<uint32_t>(p[3]);
+}
+
+inline void write_be16(uint8_t *p, uint16_t v) {
+    p[0] = static_cast<uint8_t>((v >> 8) & 0xFF);
+    p[1] = static_cast<uint8_t>(v & 0xFF);
+}
+
+inline void write_be32(uint8_t *p, uint32_t v) {
+    p[0] = static_cast<uint8_t>((v >> 24) & 0xFF);
+    p[1] = static_cast<uint8_t>((v >> 16) & 0xFF);
+    p[2] = static_cast<uint8_t>((v >> 8) & 0xFF);
+    p[3] = static_cast<uint8_t>(v & 0xFF);
+}
+
+std::optional<EnetEndpoint> parse_stun_address_attr(const uint8_t *attr, size_t attr_len, bool is_xor, const std::array<uint8_t, 12>& txid) {
+    if (attr_len < 4)
+        return std::nullopt;
+    if (attr[0] != 0)
+        return std::nullopt;
+
+    const uint8_t family = attr[1];
+    uint16_t port = read_be16(attr + 2);
+
+    if (is_xor)
+        port ^= static_cast<uint16_t>(kStunMagicCookie >> 16);
+
+    if (family == 0x01) {
+        if (attr_len < 8)
+            return std::nullopt;
+
+        uint8_t addr_bytes[4];
+        std::memcpy(addr_bytes, attr + 4, 4);
+
+        if (is_xor) {
+            const uint8_t cookie_bytes[4] = {0x21, 0x12, 0xA4, 0x42};
+            for (int i = 0; i < 4; ++i)
+                addr_bytes[i] ^= cookie_bytes[i];
+        }
+
+        sockaddr_in sa{};
+        sa.sin_family = AF_INET;
+        sa.sin_port = htons(port);
+        std::memcpy(&sa.sin_addr, addr_bytes, sizeof(addr_bytes));
+
+        EnetEndpoint ep{};
+        std::memcpy(&ep.addr, &sa, sizeof(sa));
+        ep.len = sizeof(sa);
+        return ep;
+    }
+
+#if defined(AF_INET6)
+    if (family == 0x02) {
+        if (attr_len < 20)
+            return std::nullopt;
+
+        uint8_t addr_bytes[16];
+        std::memcpy(addr_bytes, attr + 4, 16);
+
+        if (is_xor) {
+            const uint8_t cookie_bytes[4] = {0x21, 0x12, 0xA4, 0x42};
+            for (int i = 0; i < 4; ++i)
+                addr_bytes[i] ^= cookie_bytes[i];
+            for (int i = 0; i < 12; ++i)
+                addr_bytes[4 + i] ^= txid[i];
+        }
+
+        sockaddr_in6 sa{};
+        sa.sin6_family = AF_INET6;
+        sa.sin6_port = htons(port);
+        std::memcpy(&sa.sin6_addr, addr_bytes, sizeof(addr_bytes));
+
+        EnetEndpoint ep{};
+        std::memcpy(&ep.addr, &sa, sizeof(sa));
+        ep.len = sizeof(sa);
+        return ep;
+    }
+#endif
+
+    return std::nullopt;
+}
+} // namespace
+
 UdpSocket::UdpSocket() {
 #if defined(_WIN32)
     static bool wsa_inited = false;
@@ -168,6 +263,166 @@ bool UdpSocket::connect_to(const std::string& host, uint16_t port) {
 #endif
 
     return false;
+}
+
+std::optional<EnetEndpoint> UdpSocket::lookup_hostname(const char *hostname, uint16_t port) noexcept {
+    if (!hostname || !*hostname)
+        return std::nullopt;
+
+#if defined(LUXON_ENET_HAS_PTON)
+    {
+        sockaddr_in sa4{};
+        sa4.sin_family = AF_INET;
+        sa4.sin_port = htons(port);
+        if (inet_pton(AF_INET, hostname, &sa4.sin_addr) == 1) {
+            EnetEndpoint ep{};
+            std::memcpy(&ep.addr, &sa4, sizeof(sa4));
+            ep.len = sizeof(sa4);
+            return ep;
+        }
+    }
+
+#if defined(AF_INET6)
+    {
+        sockaddr_in6 sa6{};
+        sa6.sin6_family = AF_INET6;
+        sa6.sin6_port = htons(port);
+        if (inet_pton(AF_INET6, hostname, &sa6.sin6_addr) == 1) {
+            EnetEndpoint ep{};
+            std::memcpy(&ep.addr, &sa6, sizeof(sa6));
+            ep.len = sizeof(sa6);
+            return ep;
+        }
+    }
+#endif
+#endif
+
+#if defined(_WIN32) || defined(LUXON_ENET_HAS_NETDB)
+    addrinfo hints{};
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_DGRAM;
+#if defined(IPPROTO_UDP)
+    hints.ai_protocol = IPPROTO_UDP;
+#endif
+
+    addrinfo *result = nullptr;
+    if (getaddrinfo(hostname, nullptr, &hints, &result) != 0 || !result)
+        return std::nullopt;
+
+    std::optional<EnetEndpoint> out;
+
+    for (addrinfo *it = result; it; it = it->ai_next) {
+        if (!it->ai_addr)
+            continue;
+
+        if (it->ai_family == AF_INET && it->ai_addrlen >= static_cast<socklen_t>(sizeof(sockaddr_in))) {
+            sockaddr_in sa{};
+            std::memcpy(&sa, it->ai_addr, sizeof(sa));
+            sa.sin_port = htons(port);
+
+            EnetEndpoint ep{};
+            std::memcpy(&ep.addr, &sa, sizeof(sa));
+            ep.len = sizeof(sa);
+            out = ep;
+            break;
+        }
+
+#if defined(AF_INET6)
+        if (it->ai_family == AF_INET6 && it->ai_addrlen >= static_cast<socklen_t>(sizeof(sockaddr_in6))) {
+            sockaddr_in6 sa{};
+            std::memcpy(&sa, it->ai_addr, sizeof(sa));
+            sa.sin6_port = htons(port);
+
+            EnetEndpoint ep{};
+            std::memcpy(&ep.addr, &sa, sizeof(sa));
+            ep.len = sizeof(sa);
+            out = ep;
+            break;
+        }
+#endif
+    }
+
+    freeaddrinfo(result);
+    return out;
+#else
+    return std::nullopt;
+#endif
+}
+
+bool UdpSocket::send_stun_binding_request(const EnetEndpoint& to) {
+    if (!is_open())
+        return false;
+
+    uint8_t req[20]{};
+    write_be16(req + 0, kStunBindingRequest);
+    write_be16(req + 2, 0);
+    write_be32(req + 4, kStunMagicCookie);
+
+    std::array<uint8_t, 12> txid{};
+    std::random_device rd;
+    for (size_t i = 0; i < txid.size(); ++i)
+        txid[i] = static_cast<uint8_t>(rd() & 0xFF);
+
+    std::memcpy(req + 8, txid.data(), txid.size());
+
+    const bool ok = connected_ ? send_connected(req, sizeof(req)) : send_to(req, sizeof(req), to);
+    if (!ok) {
+        stun_request_pending_ = false;
+        return false;
+    }
+
+    stun_transaction_id_ = txid;
+    stun_request_pending_ = true;
+    return true;
+}
+
+std::optional<EnetEndpoint> UdpSocket::parse_stun_binding_response(DatagramView datagram) {
+    if (!stun_request_pending_ || datagram.size() < 20)
+        return std::nullopt;
+
+    const uint16_t msg_type = read_be16(datagram.data() + 0);
+    const uint16_t msg_len = read_be16(datagram.data() + 2);
+    const uint32_t cookie = read_be32(datagram.data() + 4);
+
+    if (cookie != kStunMagicCookie)
+        return std::nullopt;
+    if (datagram.size() < static_cast<size_t>(20 + msg_len))
+        return std::nullopt;
+    if (!std::equal(stun_transaction_id_.begin(), stun_transaction_id_.end(), datagram.begin() + 8))
+        return std::nullopt;
+
+    // Matching response for our outstanding request.
+    stun_request_pending_ = false;
+
+    if (msg_type != kStunBindingSuccessResponse)
+        return std::nullopt;
+
+    size_t offset = 20;
+    const size_t end = 20 + msg_len;
+
+    while (offset + 4 <= end) {
+        const uint16_t attr_type = read_be16(datagram.data() + offset + 0);
+        const uint16_t attr_len = read_be16(datagram.data() + offset + 2);
+        offset += 4;
+
+        if (offset + attr_len > end)
+            return std::nullopt;
+
+        const uint8_t *attr = datagram.data() + offset;
+
+        if (attr_type == kStunAttrXorMappedAddress) {
+            if (auto ep = parse_stun_address_attr(attr, attr_len, true, stun_transaction_id_))
+                return ep;
+        } else if (attr_type == kStunAttrMappedAddress) {
+            if (auto ep = parse_stun_address_attr(attr, attr_len, false, stun_transaction_id_))
+                return ep;
+        }
+
+        offset += attr_len;
+        offset = (offset + 3u) & ~size_t(3u);
+    }
+
+    return std::nullopt;
 }
 
 bool UdpSocket::send_connected(const uint8_t *data, size_t len) {

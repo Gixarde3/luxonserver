@@ -103,6 +103,11 @@ public:
     bool bind_any(uint16_t port, bool ipv6 = false);
     bool connect_to(const std::string& host, uint16_t port);
 
+    static std::optional<EnetEndpoint> lookup_hostname(const char *hostname, uint16_t port = 0) noexcept;
+
+    bool send_stun_binding_request(const EnetEndpoint& to);
+    std::optional<EnetEndpoint> parse_stun_binding_response(DatagramView datagram);
+
     bool is_open() const {
 #ifdef _WIN32
         return sock_ != INVALID_SOCKET;
@@ -129,6 +134,9 @@ private:
 #endif
     bool owning_ = true;
     bool connected_ = false;
+
+    std::array<uint8_t, 12> stun_transaction_id_ = {};
+    bool stun_request_pending_ = false;
 };
 
 // Internal command with resend metadata
@@ -377,11 +385,20 @@ public:
     void service_self();
     bool service_peers();
 
-    // Called when a new peer is created (after receiving EnetCommandType::Connect).
+    // Called when a new peer is created (after receiving EnetCommandType::Connect)
     std::function<void(std::shared_ptr<EnetPeer>)> on_peer_connected;
 
-    // Find peer by assigned peer_id.
+    // Called when STUN binding is complete
+    std::function<void(EnetEndpoint&&)> on_stun_bind;
+
+    // Find peer by assigned peer_id
     std::shared_ptr<EnetPeer> find_peer(int16_t peer_id) const;
+
+    // Delete peer by shared pointer, used to finalize disconnect
+    void remove_peer(std::shared_ptr<EnetPeer> peer);
+
+    // Request STUN binding
+    bool request_stun_binding(const char *server_hostname, uint16_t server_port);
 
     // Get native UDP socket
     SocketType native_handle() const { return sock_.native_handle(); }
@@ -400,8 +417,8 @@ private:
     std::unordered_map<EnetEndpoint, std::shared_ptr<EnetPeer>, EnetEndpointHash> peers_by_ep_;
     std::unordered_map<int16_t, std::shared_ptr<EnetPeer>> peers_by_id_;
 
-    // Delete peer by shared pointer, used to finalize disconnect
-    void remove_peer(std::shared_ptr<EnetPeer> peer);
+    // STUN endpoint
+    EnetEndpoint stun_ep_{};
 };
 } // namespace enet
 } // namespace luxon

@@ -16,10 +16,12 @@
 
 namespace luxon {
 namespace enet {
-static uint32_t random_u32() {
+namespace {
+uint32_t random_u32() {
     static std::mt19937 rng{std::random_device{}()};
     return std::uniform_int_distribution<uint32_t>{0, 0xFFFFFFFFu}(rng);
 }
+} // namespace
 
 EnetDeliveryMode FlagsToEnetDeliveryMode(uint8_t flags) {
     switch (flags) {
