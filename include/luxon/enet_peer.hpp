@@ -400,6 +400,10 @@ public:
     // Request STUN binding
     bool request_stun_binding(const char *server_hostname, uint16_t server_port);
 
+    // Get UDP socket
+    UdpSocket& socket() { return sock_; }
+    const UdpSocket& socket() const { return sock_; }
+
     // Get native UDP socket
     SocketType native_handle() const { return sock_.native_handle(); }
 
