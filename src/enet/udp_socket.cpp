@@ -76,7 +76,7 @@ std::optional<EnetEndpoint> parse_stun_address_attr(const uint8_t *attr, size_t 
         return ep;
     }
 
-#if defined(AF_INET6)
+#if HAS_SOCKADDR_IN6
     if (family == 0x02) {
         if (attr_len < 20)
             return std::nullopt;
@@ -269,7 +269,7 @@ std::optional<EnetEndpoint> UdpSocket::lookup_hostname(const char *hostname, uin
     if (!hostname || !*hostname)
         return std::nullopt;
 
-#if defined(LUXON_ENET_HAS_PTON)
+#ifdef LUXON_ENET_HAS_PTON
     {
         sockaddr_in sa4{};
         sa4.sin_family = AF_INET;
@@ -282,7 +282,7 @@ std::optional<EnetEndpoint> UdpSocket::lookup_hostname(const char *hostname, uin
         }
     }
 
-#if defined(AF_INET6)
+#ifdef HAS_SOCKADDR_IN6
     {
         sockaddr_in6 sa6{};
         sa6.sin6_family = AF_INET6;
@@ -327,7 +327,7 @@ std::optional<EnetEndpoint> UdpSocket::lookup_hostname(const char *hostname, uin
             break;
         }
 
-#if defined(AF_INET6)
+#ifdef HAS_SOCKADDR_IN6
         if (it->ai_family == AF_INET6 && it->ai_addrlen >= static_cast<socklen_t>(sizeof(sockaddr_in6))) {
             sockaddr_in6 sa{};
             std::memcpy(&sa, it->ai_addr, sizeof(sa));
