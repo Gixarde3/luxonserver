@@ -84,7 +84,7 @@ void EnetServer::service_self() {
                 on_stun_bind(std::move(*ep_opt));
                 stun_ep_ = {};
             }
-            return;
+            break;
         }
 
         // Parse header to find challenge/peer id, etc.
