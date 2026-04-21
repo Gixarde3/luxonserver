@@ -65,6 +65,8 @@ bool EnetServer::request_stun_binding(const char *server_hostname, uint16_t serv
     return true;
 }
 
+bool EnetServer::keepalive_stun_binding() { return sock_.send_to(reinterpret_cast<const uint8_t *>(""), 1, stun_ep_); }
+
 void EnetServer::service_self() {
     // Poll socket
     DatagramBuffer buf;
@@ -82,10 +84,8 @@ void EnetServer::service_self() {
 
         // Handle STUN response
         if (stun_ep_ == from) {
-            if (auto ep_opt = sock_.parse_stun_binding_response(datagram)) {
+            if (auto ep_opt = sock_.parse_stun_binding_response(datagram))
                 on_stun_bind(std::move(*ep_opt));
-                stun_ep_ = {};
-            }
             break;
         }
 

@@ -234,16 +234,6 @@ public:
     // Returns true if something was dispatched
     bool dispatch_one();
 
-    // Callbacks (optional)
-    std::function<void(EnetConnectionState)> on_state_changed;
-    std::function<void(EnetCommand&&)> on_payload_command;
-    std::function<void(LogLevel, std::string_view)> on_log_message;
-    void reset_callbacks() {
-        on_state_changed = nullptr;
-        on_payload_command = nullptr;
-        on_log_message = nullptr;
-    }
-
     // Stats
     int round_trip_time() const { return rtt_; }
     int round_trip_variance() const { return rtt_var_; }
@@ -259,6 +249,21 @@ public:
     int get_server_time() const { return now_ms(); }
     static int create_time_base();
     void sync_local_time_to_remote_dynamic(const EnetPeer& remote);
+
+    // Get underlaying socket
+    UdpSocket& socket() { return *sock_; }
+    const UdpSocket& socket() const { return *sock_; }
+
+    // Callbacks (optional)
+    void reset_callbacks() {
+        on_state_changed = nullptr;
+        on_payload_command = nullptr;
+        on_log_message = nullptr;
+    }
+
+    std::function<void(EnetConnectionState)> on_state_changed;
+    std::function<void(EnetCommand&&)> on_payload_command;
+    std::function<void(LogLevel, std::string_view)> on_log_message;
 
 private:
     void set_state(EnetConnectionState new_state);
@@ -401,6 +406,12 @@ public:
 
     // Request STUN binding
     bool request_stun_binding(const char *server_hostname, uint16_t server_port);
+
+    // Keep STUN binding alive
+    bool keepalive_stun_binding();
+
+    // Get endpoint of used STUN server
+    const EnetEndpoint& stun_server_endpoint() { return stun_ep_; }
 
     // Get UDP socket
     UdpSocket& socket() { return sock_; }
