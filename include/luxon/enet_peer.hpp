@@ -76,6 +76,8 @@ struct EnetEndpoint {
     sockaddr_storage addr{};
     socklen_t len = 0;
 
+    static std::optional<EnetEndpoint> from(const char *host, uint16_t port);
+
     bool operator==(const EnetEndpoint& o) const;
     std::string to_string() const;
 };

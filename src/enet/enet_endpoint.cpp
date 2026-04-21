@@ -19,6 +19,40 @@ static bool sockaddr_equal(const sockaddr_storage& a, socklen_t alen, const sock
     return std::memcmp(&a, &b, alen) == 0;
 }
 
+std::optional<EnetEndpoint> EnetEndpoint::from(const char *host, uint16_t port) {
+    sockaddr_storage ss{};
+    socklen_t slen = 0;
+
+    // Try IPv4
+    sockaddr_in sa4{};
+    sa4.sin_family = AF_INET;
+    sa4.sin_port = htons(port);
+#ifdef HAS_PTON
+    if (inet_pton(AF_INET, host, &sa4.sin_addr) == 1) {
+#else
+    if (inet_aton(host, &sa4.sin_addr) != 0) {
+#endif
+        std::memcpy(&ss, &sa4, sizeof(sa4));
+        slen = sizeof(sa4);
+    }
+
+    // Try IPv6
+#ifdef HAS_SOCKADDR_IN6
+    sockaddr_in6 sa6{};
+    sa6.sin6_family = AF_INET6;
+    sa6.sin6_port = htons(port);
+    if (inet_pton(AF_INET6, host, &sa6.sin6_addr) == 1) {
+        std::memcpy(&ss, &sa6, sizeof(sa6));
+        slen = sizeof(sa6);
+    }
+#endif
+
+    if (!slen)
+        return std::nullopt;
+
+    return EnetEndpoint{ss, slen};
+}
+
 bool EnetEndpoint::operator==(const EnetEndpoint& o) const { return sockaddr_equal(addr, len, o.addr, o.len); }
 
 std::string EnetEndpoint::to_string() const {
