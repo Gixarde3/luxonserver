@@ -388,7 +388,7 @@ public:
 #endif
     );
 
-    bool bind(uint16_t port, bool ipv6 = false);
+    bool bind(uint16_t port, bool ipv6 = true);
     void service() {
         service_self();
         service_peers();
