@@ -76,7 +76,7 @@ std::optional<EnetEndpoint> parse_stun_address_attr(const uint8_t *attr, size_t 
         return ep;
     }
 
-#if HAS_SOCKADDR_IN6
+#ifdef HAS_SOCKADDR_IN6
     if (family == 0x02) {
         if (attr_len < 20)
             return std::nullopt;
@@ -109,7 +109,7 @@ std::optional<EnetEndpoint> parse_stun_address_attr(const uint8_t *attr, size_t 
 } // namespace
 
 UdpSocket::UdpSocket() {
-#if defined(_WIN32)
+#ifdef _WIN32
     static bool wsa_inited = false;
     if (!wsa_inited) {
         WSADATA w;
@@ -127,7 +127,7 @@ UdpSocket::~UdpSocket() {
 }
 
 void UdpSocket::close() {
-#if defined(_WIN32)
+#ifdef _WIN32
     if (sock_ != INVALID_SOCKET) {
         closesocket(sock_);
         sock_ = INVALID_SOCKET;
@@ -142,7 +142,7 @@ void UdpSocket::close() {
 }
 
 void UdpSocket::set_nonblocking(bool nb) {
-#if defined(_WIN32)
+#ifdef _WIN32
     u_long mode = nb ? 1 : 0;
     ioctlsocket(sock_, FIONBIO, &mode);
 #else
@@ -161,7 +161,7 @@ bool UdpSocket::bind_any(uint16_t port, bool ipv6) {
     close();
 
     int af = ipv6 ? AF_INET6 : AF_INET;
-#if defined(_WIN32)
+#ifdef _WIN32
     sock_ = ::socket(af, SOCK_DGRAM, IPPROTO_UDP);
     if (sock_ == INVALID_SOCKET)
         return false;
@@ -173,6 +173,13 @@ bool UdpSocket::bind_any(uint16_t port, bool ipv6) {
 
     int yes = 1;
     setsockopt(sock_, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char *>(&yes), sizeof(yes));
+
+#ifdef HAS_SOCKADDR_IN6
+    if (ipv6) {
+        int no = 0;
+        setsockopt(sock_, IPPROTO_IPV6, IPV6_V6ONLY, reinterpret_cast<const char *>(&no), sizeof(no));
+    }
+#endif
 
     if (!ipv6) {
         sockaddr_in sa{};
@@ -219,7 +226,7 @@ bool UdpSocket::connect_to(const std::string& host, uint16_t port) {
 #endif
         std::memcpy(&ss, &sa4, sizeof(sa4));
         slen = sizeof(sa4);
-#if defined(_WIN32)
+#ifdef _WIN32
         sock_ = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         if (sock_ == INVALID_SOCKET)
             return false;
@@ -244,7 +251,7 @@ bool UdpSocket::connect_to(const std::string& host, uint16_t port) {
     if (inet_pton(AF_INET6, host.c_str(), &sa6.sin6_addr) == 1) {
         std::memcpy(&ss, &sa6, sizeof(sa6));
         slen = sizeof(sa6);
-#if defined(_WIN32)
+#ifdef _WIN32
         sock_ = ::socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
         if (sock_ == INVALID_SOCKET)
             return false;
@@ -301,7 +308,7 @@ std::optional<EnetEndpoint> UdpSocket::lookup_hostname(const char *hostname, uin
     addrinfo hints{};
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_DGRAM;
-#if defined(IPPROTO_UDP)
+#ifdef IPPROTO_UDP
     hints.ai_protocol = IPPROTO_UDP;
 #endif
 
@@ -428,7 +435,7 @@ std::optional<EnetEndpoint> UdpSocket::parse_stun_binding_response(DatagramView 
 bool UdpSocket::send_connected(const uint8_t *data, size_t len) {
     if (!connected_)
         return false;
-#if defined(_WIN32)
+#ifdef _WIN32
     int sent = ::send(sock_, reinterpret_cast<const char *>(data), (int)len, 0);
     return sent == (int)len;
 #else
@@ -440,7 +447,7 @@ bool UdpSocket::send_connected(const uint8_t *data, size_t len) {
 bool UdpSocket::send_to(const uint8_t *data, size_t len, const EnetEndpoint& to) {
     if (!is_open())
         return false;
-#if defined(_WIN32)
+#ifdef _WIN32
     int sent = ::sendto(sock_, reinterpret_cast<const char *>(data), (int)len, 0, reinterpret_cast<const sockaddr *>(&to.addr), to.len);
     return sent == (int)len;
 #else
@@ -454,7 +461,7 @@ size_t UdpSocket::recv_from(uint8_t *buf, size_t cap, EnetEndpoint& from) {
         return 0;
     sockaddr_storage ss{};
     socklen_t slen = sizeof(ss);
-#if defined(_WIN32)
+#ifdef _WIN32
     int r = ::recvfrom(sock_, reinterpret_cast<char *>(buf), (int)cap, 0, reinterpret_cast<sockaddr *>(&ss), &slen);
     if (r <= 0)
         return 0;

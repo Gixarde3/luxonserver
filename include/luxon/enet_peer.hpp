@@ -21,7 +21,7 @@
 #include <memory>
 #include <cstdint>
 
-#if defined(_WIN32)
+#ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #else
@@ -30,6 +30,10 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <unistd.h>
+#endif
+
+#ifndef __3DS__
+#define HAS_SOCKADDR_IN6
 #endif
 
 namespace luxon {
@@ -102,7 +106,7 @@ public:
     UdpSocket(const UdpSocket&) = delete;
     UdpSocket& operator=(const UdpSocket&) = delete;
 
-    bool bind_any(uint16_t port, bool ipv6 = false);
+    bool bind_any(uint16_t port, bool ipv6 = true);
     bool connect_to(const std::string& host, uint16_t port);
 
     static std::optional<EnetEndpoint> lookup_hostname(const char *hostname, uint16_t port = 0) noexcept;
@@ -129,7 +133,7 @@ public:
     void close();
 
 private:
-#if defined(_WIN32)
+#ifdef _WIN32
     SOCKET sock_ = INVALID_SOCKET;
 #else
     int sock_ = -1;
