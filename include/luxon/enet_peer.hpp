@@ -109,7 +109,7 @@ public:
     bool bind_any(uint16_t port, bool ipv6 = true);
     bool connect_to(const std::string& host, uint16_t port);
 
-    static std::optional<EnetEndpoint> lookup_hostname(const char *hostname, uint16_t port = 0) noexcept;
+    static std::optional<EnetEndpoint> lookup_hostname(const char *hostname, bool ipv6, uint16_t port = 0) noexcept;
 
     bool send_stun_binding_request(const EnetEndpoint& to);
     std::optional<EnetEndpoint> parse_stun_binding_response(DatagramView datagram);
@@ -409,7 +409,7 @@ public:
     void remove_peer(std::shared_ptr<EnetPeer> peer);
 
     // Request STUN binding
-    bool request_stun_binding(const char *server_hostname, uint16_t server_port);
+    bool request_stun_binding(const char *server_hostname, bool ipv6, uint16_t server_port);
 
     // Keep STUN binding alive
     bool keepalive_stun_binding();

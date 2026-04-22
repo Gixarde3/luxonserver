@@ -55,8 +55,8 @@ void EnetServer::remove_peer(std::shared_ptr<EnetPeer> peer) {
     }
 }
 
-bool EnetServer::request_stun_binding(const char *server_hostname, uint16_t server_port) {
-    const auto ep_opt = sock_.lookup_hostname(server_hostname, server_port);
+bool EnetServer::request_stun_binding(const char *server_hostname, bool ipv6, uint16_t server_port) {
+    const auto ep_opt = sock_.lookup_hostname(server_hostname, ipv6, server_port);
     if (!ep_opt)
         return false;
     if (!sock_.send_stun_binding_request(*ep_opt))

@@ -272,7 +272,7 @@ bool UdpSocket::connect_to(const std::string& host, uint16_t port) {
     return false;
 }
 
-std::optional<EnetEndpoint> UdpSocket::lookup_hostname(const char *hostname, uint16_t port) noexcept {
+std::optional<EnetEndpoint> UdpSocket::lookup_hostname(const char *hostname, bool ipv6, uint16_t port) noexcept {
     if (!hostname || !*hostname)
         return std::nullopt;
 
@@ -306,7 +306,7 @@ std::optional<EnetEndpoint> UdpSocket::lookup_hostname(const char *hostname, uin
 
 #if defined(_WIN32) || defined(LUXON_ENET_HAS_NETDB)
     addrinfo hints{};
-    hints.ai_family = AF_UNSPEC;
+    hints.ai_family = ipv6 ? AF_UNSPEC : AF_INET;
     hints.ai_socktype = SOCK_DGRAM;
 #ifdef IPPROTO_UDP
     hints.ai_protocol = IPPROTO_UDP;
