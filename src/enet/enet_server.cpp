@@ -207,5 +207,23 @@ bool EnetServer::service_peers(uint32_t& timeout_us) {
 
     return result;
 }
+
+bool EnetServer::service_peers() {
+    std::vector<std::shared_ptr<EnetPeer>> dead_peers;
+
+    for (auto& [ep, peer] : peers_by_ep_) {
+        if (peer->state() == EnetConnectionState::Disconnected) {
+            dead_peers.push_back(peer);
+            continue;
+        }
+        if (!peer->service())
+            return false; // Stop if datagrams had to be queued up
+    }
+
+    for (const auto& dead_peer : dead_peers)
+        remove_peer(dead_peer);
+
+    return true;
+}
 } // namespace enet
 } // namespace luxon

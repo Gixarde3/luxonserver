@@ -399,13 +399,17 @@ public:
     );
 
     bool bind(uint16_t port, bool ipv6 = true);
+    void service(uint32_t& timeout_us) {
+        service_self();
+        service_peers(timeout_us);
+    }
     void service() {
         service_self();
-        uint32_t timeout_us = 0xFFFFFFFF;
-        service_peers(timeout_us);
+        service_peers();
     }
     void service_self();
     bool service_peers(uint32_t& timeout_us);
+    bool service_peers();
 
     // Called when a new peer is created (after receiving EnetCommandType::Connect)
     std::function<void(std::shared_ptr<EnetPeer>)> on_peer_connected;
