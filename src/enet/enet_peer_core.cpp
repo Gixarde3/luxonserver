@@ -918,7 +918,6 @@ bool EnetPeer::flush_send_queue(bool only_acks) {
             auto& s = sent_reliable_[i];
             if (s.round_trip_timeout != 0 && (time_int_ - s.command_sent_time) > s.round_trip_timeout) {
                 if (s.command_sent_count > cfg_.max_resends || time_int_ > s.timeout_time) {
-                    ENET_METRIC_ADD(enet.timeout_disconnects, 1);
                     ENET_METRIC_ADD(global.disconnected_peers_t, 1);
 
                     set_state(EnetConnectionState::Stale);

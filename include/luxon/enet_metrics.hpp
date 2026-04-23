@@ -102,7 +102,6 @@ struct alignas(64) Metrics {
         RateCounter acknowledgements_out;
         RateCounter pings_in;
         RateCounter pings_out;
-        RateCounter timeout_disconnects;
 
         // RateCounter transmit_rate_limit_bytes_queued;
         // RateCounter transmit_rate_limit_bytes_discarded;
@@ -149,7 +148,6 @@ struct alignas(64) Metrics {
         enet.acknowledgements_out.tick(dt_seconds);
         enet.pings_in.tick(dt_seconds);
         enet.pings_out.tick(dt_seconds);
-        enet.timeout_disconnects.tick(dt_seconds);
     }
 };
 } // namespace enet
