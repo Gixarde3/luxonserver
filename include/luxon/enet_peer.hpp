@@ -65,7 +65,7 @@ struct EnetPeerConfig {
 
     // Hard rate/size limits
     size_t max_payload_size = 500 * 1024;
-    uint32_t max_messages_per_second = 120;
+    uint32_t max_messages_per_second = 500;
 
     // Parse incoming connect command and extract configuration
     void apply_connect_command(const EnetCommand& cmd) {
