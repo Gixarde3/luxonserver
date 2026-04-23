@@ -55,6 +55,13 @@ std::optional<EnetEndpoint> EnetEndpoint::from(const char *host, uint16_t port) 
 
 bool EnetEndpoint::operator==(const EnetEndpoint& o) const { return sockaddr_equal(addr, len, o.addr, o.len); }
 
+bool EnetEndpoint::operator<(const EnetEndpoint& o) const {
+    if (len != o.len)
+        return len < o.len;
+
+    return std::memcmp(&addr, &o.addr, len) < 0;
+}
+
 std::string EnetEndpoint::to_string() const {
 #ifdef HAS_GETNAMEINFO
     char host[NI_MAXHOST]{};

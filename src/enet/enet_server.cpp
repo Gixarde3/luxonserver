@@ -4,8 +4,8 @@
 #include "enet_peer.hpp"
 #include "enet_metrics_macros.hpp"
 
-#include <array>
 #include <span>
+#include <chrono>
 
 namespace luxon {
 namespace enet {
@@ -149,22 +149,63 @@ void EnetServer::service_self() {
     }
 }
 
-bool EnetServer::service_peers() {
+bool EnetServer::service_peers(uint32_t& timeout_us) {
+    auto start_time = std::chrono::steady_clock::now();
     std::vector<std::shared_ptr<EnetPeer>> dead_peers;
+    bool result = true;
 
-    for (auto& [ep, peer] : peers_by_ep_) {
+    // If queue is empty, we've completed a full cycle, repopulate with all current peer IDs
+    if (service_queue_.empty()) {
+        service_queue_.reserve(peers_by_id_.size());
+        for (const auto& [id, peer] : peers_by_id_)
+            service_queue_.push_back(id);
+    }
+
+    while (!service_queue_.empty()) {
+        // Pop peer ID to process
+        int16_t peer_id = service_queue_.back();
+        service_queue_.pop_back();
+
+        // Find peer
+        auto it = peers_by_id_.find(peer_id);
+        if (it == peers_by_id_.end())
+            continue; // Peer has disconnected
+
+        auto peer = it->second;
+
         if (peer->state() == EnetConnectionState::Disconnected) {
             dead_peers.push_back(peer);
             continue;
         }
-        if (!peer->service())
-            return false; // Stop if datagrams had to be queued up
+
+        if (!peer->service()) {
+            // Processing stopped, re-add to the back so it gets processed first next time
+            service_queue_.push_back(peer_id);
+            result = false;
+            break;
+        }
+
+        // Check if timeout is exceeded
+        auto now = std::chrono::steady_clock::now();
+        uint32_t elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(now - start_time).count();
+        if (elapsed_us >= timeout_us)
+            break;
     }
 
+    // Clean up dead peers
     for (const auto& dead_peer : dead_peers)
         remove_peer(dead_peer);
 
-    return true;
+    // Calculate total time taken and adjust the timeout parameter
+    auto end_time = std::chrono::steady_clock::now();
+    uint32_t elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
+
+    if (elapsed_us >= timeout_us)
+        timeout_us = 0;
+    else
+        timeout_us -= elapsed_us;
+
+    return result;
 }
 } // namespace enet
 } // namespace luxon

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "enet_protocol.hpp"
+#include "flat_map.hpp"
 #include "sliding_flat_map.hpp"
 #ifdef LUXON_ENET_ENABLE_METRICS
 #include "enet_metrics.hpp"
@@ -87,6 +88,7 @@ struct EnetEndpoint {
     static std::optional<EnetEndpoint> from(const char *host, uint16_t port);
 
     bool operator==(const EnetEndpoint& o) const;
+    bool operator<(const EnetEndpoint& o) const;
     std::string to_string() const;
 };
 
@@ -399,10 +401,11 @@ public:
     bool bind(uint16_t port, bool ipv6 = true);
     void service() {
         service_self();
-        service_peers();
+        uint32_t timeout_us = 0xFFFFFFFF;
+        service_peers(timeout_us);
     }
     void service_self();
-    bool service_peers();
+    bool service_peers(uint32_t& timeout_us);
 
     // Called when a new peer is created (after receiving EnetCommandType::Connect)
     std::function<void(std::shared_ptr<EnetPeer>)> on_peer_connected;
@@ -443,11 +446,14 @@ private:
     int16_t next_peer_id_ = 1;
 
     // endpoint->peer mapping
-    std::unordered_map<EnetEndpoint, std::shared_ptr<EnetPeer>, EnetEndpointHash> peers_by_ep_;
-    std::unordered_map<int16_t, std::shared_ptr<EnetPeer>> peers_by_id_;
+    flat_map<EnetEndpoint, std::shared_ptr<EnetPeer>> peers_by_ep_;
+    flat_map<int16_t, std::shared_ptr<EnetPeer>> peers_by_id_;
 
     // STUN endpoint
     EnetEndpoint stun_ep_{};
+
+    // Queue to round-robin service peers across multiple ticks
+    std::vector<int16_t> service_queue_;
 };
 } // namespace enet
 } // namespace luxon
