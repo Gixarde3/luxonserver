@@ -195,6 +195,13 @@ bool EnetPeer::send_payload(DatagramView payload, const EnetSendOptions& opt) {
     if (opt.channel >= cfg_.channel_count)
         return false;
 
+    // Enforce max message size limit
+    if (payload.size() > cfg_.max_payload_size) {
+        if (on_log_message)
+            on_log_message(LogLevel::Error, "Payload size exceeds limit");
+        return false;
+    }
+
     // Determine command type
     EnetCommandType ct = EnetCommandType::SendUnreliable;
     uint8_t flags = FlagValue::Unreliable;
@@ -423,6 +430,16 @@ std::optional<EnetOutCommand> EnetPeer::remove_sent_reliable(uint32_t ack_seq, u
 }
 
 void EnetPeer::handle_fragment(const EnetCommand& fragment_cmd) {
+    // Enforce size limit on incoming assemblies
+    if (fragment_cmd.fragment_total_length > cfg_.max_payload_size) {
+        ENET_METRIC_ADD(enet.reliable_commands_in_dropped, 1);
+        if (on_log_message)
+            on_log_message(LogLevel::Error, "Incoming fragmented payload exceeds size limit, Disconnecting!");
+
+        disconnect(true);
+        return;
+    }
+
     EnetChannel& ch = channel(fragment_cmd.header.channel_id);
     const bool sequenced = (fragment_cmd.header.command_type == EnetCommandType::SendFragment);
 
@@ -545,6 +562,22 @@ bool EnetPeer::queue_incoming_command(const EnetCommand& cmd) {
 void EnetPeer::execute_command(const EnetCommand& cmd) {
     ENET_METRIC_ADD(enet.commands_in, 1);
 
+    // Rate limit check
+    int current_sec = now_ms() / 1000;
+    if (current_sec != current_second_) {
+        current_second_ = current_sec;
+        messages_this_second_ = 0;
+    }
+
+    messages_this_second_++;
+    if (messages_this_second_ > cfg_.max_messages_per_second) {
+        if (on_log_message)
+            on_log_message(LogLevel::Warning, "Peer exceeded message rate limit, disconnecting!");
+        disconnect(true);
+        return;
+    }
+
+    // Execute command
     switch (cmd.header.command_type) {
     case EnetCommandType::Acknowledge:
     case EnetCommandType::EgAcknowledgeUnsequenced: {

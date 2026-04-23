@@ -63,6 +63,10 @@ struct EnetPeerConfig {
     uint8_t fast_resend_count = 0;
     int max_pending_unreliable_commands = 0;
 
+    // Hard rate/size limits
+    size_t max_payload_size = 500 * 1024;
+    uint32_t max_messages_per_second = 120;
+
     // Parse incoming connect command and extract configuration
     void apply_connect_command(const EnetCommand& cmd) {
         if (cmd.header.command_type == EnetCommandType::Connect && cmd.get_payload_size() >= 12) {
@@ -370,6 +374,10 @@ private:
     // Fragment length cache
     size_t fragment_length_ = 0;
     uint16_t fragment_length_mtu_ = 0;
+
+    // Message rate limiting
+    int current_second_ = 0;
+    uint32_t messages_this_second_ = 0;
 
     // Dispatch queue: commands ready to deliver in order
     std::queue<EnetCommand> dispatch_queue_;
