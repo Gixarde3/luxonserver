@@ -128,10 +128,13 @@ void EnetServer::service_self() {
             peers_by_ep_[from] = peer;
             peers_by_id_[assigned] = peer;
 
-            peer->on_state_changed = [this, peer](EnetConnectionState st) {
-                if (st == EnetConnectionState::Connected)
-                    if (on_peer_connected)
-                        on_peer_connected(peer);
+            peer->on_state_changed = [this, weak_peer = std::weak_ptr(peer)](EnetConnectionState st) {
+                if (st == EnetConnectionState::Connected) {
+                    if (auto p = weak_peer.lock()) {
+                        if (on_peer_connected)
+                            on_peer_connected(p);
+                    }
+                }
             };
 
             // Feed the connect packet into the peer as well (so it acks, etc.)
@@ -147,9 +150,20 @@ void EnetServer::service_self() {
 }
 
 bool EnetServer::service_peers() {
-    for (auto& [ep, peer] : peers_by_ep_)
+    std::vector<std::shared_ptr<EnetPeer>> dead_peers;
+
+    for (auto& [ep, peer] : peers_by_ep_) {
+        if (peer->state() == EnetConnectionState::Disconnected) {
+            dead_peers.push_back(peer);
+            continue;
+        }
         if (!peer->service())
             return false; // Stop if datagrams had to be queued up
+    }
+
+    for (const auto& dead_peer : dead_peers)
+        remove_peer(dead_peer);
+
     return true;
 }
 } // namespace enet
