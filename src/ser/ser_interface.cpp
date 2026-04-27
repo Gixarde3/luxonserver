@@ -108,7 +108,7 @@ std::expected<ByteArray, Error> IProtocol::maybe_decrypt_payload(Kind kind, bool
 
 bool IProtocol::has_encryption_key() const { return crypto_.has_key(); }
 
-std::unique_ptr<IProtocol> IProtocol::make(unsigned int major_version, unsigned int minor_version) {
+std::unique_ptr<IProtocol> IProtocol::make(unsigned major_version, unsigned minor_version) {
     switch (major_version) {
     case 1:
         switch (minor_version) {
