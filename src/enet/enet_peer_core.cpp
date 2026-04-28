@@ -126,7 +126,7 @@ void EnetPeer::attach_server_side(UdpSocket& sock, const EnetEndpoint& remote, i
     oc.cmd.header.flags = FlagValue::Reliable;
 
     // VerifyConnect payload is 32 bytes: first two bytes are assigned peerID, then 30 bytes unused(?)
-    DatagramBuffer payload;
+    DatagramBuffer payload{};
     payload[0] = (uint8_t)((uint16_t)assigned_peer_id >> 8);
     payload[1] = (uint8_t)((uint16_t)assigned_peer_id & 0xFF);
     oc.cmd.set_payload(DatagramView{payload.begin(), payload.begin() + 32});
@@ -906,7 +906,7 @@ void EnetPeer::send_connect() {
     // These constants seem somewhat random but are apparently required?
     // In Wireshark these constants always seem to be sent, no matter what
     // They're probably just magic constants
-    DatagramBuffer payload;
+    DatagramBuffer payload{};
     // [2..3] mtu
     payload[2] = (uint8_t)(cfg_.mtu >> 8);
     payload[3] = (uint8_t)(cfg_.mtu & 0xFF);
