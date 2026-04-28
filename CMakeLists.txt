@@ -123,6 +123,7 @@ add_library(luxon_enet
 
 if (MSVC)
     target_compile_definitions(luxon_enet PRIVATE NOMINMAX)
+    target_compile_definitions(luxon_ser PUBLIC NOMINMAX)
 endif()
 
 target_link_libraries(luxon_enet PUBLIC
