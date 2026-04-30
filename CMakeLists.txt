@@ -10,10 +10,16 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include(cmake/CPM.cmake)
 
 # Add compile options for better error messages and warnings
-if(MSVC)
-    add_compile_options(/W4)
+if (CMAKE_BUILD_TYPE STREQUAL Debug)
+    if (MSVC)
+        add_compile_options(/W4)
+    else()
+        add_compile_options(-Wall -Wextra -Wpedantic)
+    endif()
 else()
-    add_compile_options(-Wall -Wextra -Wpedantic)
+    if (NOT MSVC)
+        add_compile_options(-Wno-macro-redefined)
+    endif()
 endif()
 
 # Functionality checks
