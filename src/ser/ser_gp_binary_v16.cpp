@@ -13,24 +13,24 @@ namespace luxon::ser {
 namespace {
 // Protocol 16 uses ASCII-ish type codes
 enum : uint8_t {
-    TC_Unknown = 0,        // also used as "unknown type" in containers
-    TC_Null = 42,          // '*'
-    TC_Boolean = 111,      // 'o'
-    TC_Byte = 98,          // 'b'
-    TC_Int16 = 107,        // 'k'
-    TC_Int32 = 105,        // 'i'
-    TC_Int64 = 108,        // 'l'
-    TC_Float = 102,        // 'f'
-    TC_Double = 100,       // 'd'
-    TC_String = 115,       // 's'
-    TC_ByteArray = 120,    // 'x'
-    TC_IntArray = 110,     // 'n'
-    TC_StringArray = 97,   // 'a'
-    TC_GenericArray = 121, // 'y'
-    TC_ObjectArray = 122,  // 'z'
-    TC_Hashtable = 104,    // 'h'
-    TC_Dictionary = 68,    // 'D'
-    TC_Custom = 99,        // 'c'
+    TC16_Unknown = 0,        // also used as "unknown type" in containers
+    TC16_Null = 42,          // '*'
+    TC16_Boolean = 111,      // 'o'
+    TC16_Byte = 98,          // 'b'
+    TC16_Int16 = 107,        // 'k'
+    TC16_Int32 = 105,        // 'i'
+    TC16_Int64 = 108,        // 'l'
+    TC16_Float = 102,        // 'f'
+    TC16_Double = 100,       // 'd'
+    TC16_String = 115,       // 's'
+    TC16_ByteArray = 120,    // 'x'
+    TC16_IntArray = 110,     // 'n'
+    TC16_StringArray = 97,   // 'a'
+    TC16_GenericArray = 121, // 'y'
+    TC16_ObjectArray = 122,  // 'z'
+    TC16_Hashtable = 104,    // 'h'
+    TC16_Dictionary = 68,    // 'D'
+    TC16_Custom = 99,        // 'c'
 };
 
 inline std::expected<void, Error> ensure_u16_size(std::size_t n, const char *what) {
@@ -128,38 +128,38 @@ std::expected<void, Error> GpBinaryV16::EncodeValue(ByteWriter& w, const Value& 
             using T = std::decay_t<decltype(a)>;
 
             if constexpr (std::is_same_v<T, std::monostate>) {
-                w.write_u8(TC_Null);
+                w.write_u8(TC16_Null);
                 return {};
             } else if constexpr (std::is_same_v<T, bool>) {
-                w.write_u8(TC_Boolean);
+                w.write_u8(TC16_Boolean);
                 w.write_u8(a ? 1 : 0);
                 return {};
             } else if constexpr (std::is_same_v<T, uint8_t>) {
-                w.write_u8(TC_Byte);
+                w.write_u8(TC16_Byte);
                 w.write_u8(a);
                 return {};
             } else if constexpr (std::is_same_v<T, int16_t>) {
-                w.write_u8(TC_Int16);
+                w.write_u8(TC16_Int16);
                 w.write_i16_be(a);
                 return {};
             } else if constexpr (std::is_same_v<T, int32_t>) {
-                w.write_u8(TC_Int32);
+                w.write_u8(TC16_Int32);
                 w.write_i32_be(a);
                 return {};
             } else if constexpr (std::is_same_v<T, int64_t>) {
-                w.write_u8(TC_Int64);
+                w.write_u8(TC16_Int64);
                 w.write_i64_be(a);
                 return {};
             } else if constexpr (std::is_same_v<T, float>) {
-                w.write_u8(TC_Float);
+                w.write_u8(TC16_Float);
                 w.write_f32_be(a);
                 return {};
             } else if constexpr (std::is_same_v<T, double>) {
-                w.write_u8(TC_Double);
+                w.write_u8(TC16_Double);
                 w.write_f64_be(a);
                 return {};
             } else if constexpr (std::is_same_v<T, std::string>) {
-                w.write_u8(TC_String);
+                w.write_u8(TC16_String);
                 return write_string_u16(w, a);
             } else if constexpr (std::is_same_v<T, ByteArray>) {
                 // optimized byte[]: 'x' + i32 length + raw bytes
@@ -167,7 +167,7 @@ std::expected<void, Error> GpBinaryV16::EncodeValue(ByteWriter& w, const Value& 
                 if (!ok)
                     return std::unexpected(ok.error());
 
-                w.write_u8(TC_ByteArray);
+                w.write_u8(TC16_ByteArray);
                 w.write_u32_be(static_cast<uint32_t>(a.size()));
                 w.write_bytes(a);
                 return {};
@@ -177,7 +177,7 @@ std::expected<void, Error> GpBinaryV16::EncodeValue(ByteWriter& w, const Value& 
                 if (!ok)
                     return std::unexpected(ok.error());
 
-                w.write_u8(TC_StringArray);
+                w.write_u8(TC16_StringArray);
                 w.write_u16_be(static_cast<uint16_t>(a.size()));
                 for (const auto& s : a) {
                     auto encs = write_string_u16(w, s);
@@ -191,7 +191,7 @@ std::expected<void, Error> GpBinaryV16::EncodeValue(ByteWriter& w, const Value& 
                 if (!ok)
                     return std::unexpected(ok.error());
 
-                w.write_u8(TC_ObjectArray);
+                w.write_u8(TC16_ObjectArray);
                 w.write_u16_be(static_cast<uint16_t>(a.size()));
                 for (const auto& e : a) {
                     auto enc = EncodeValue(w, e, depth + 1);
@@ -206,9 +206,9 @@ std::expected<void, Error> GpBinaryV16::EncodeValue(ByteWriter& w, const Value& 
                 if (!ok)
                     return std::unexpected(ok.error());
 
-                w.write_u8(TC_Dictionary);
-                w.write_u8(TC_Byte);
-                w.write_u8(TC_Unknown);
+                w.write_u8(TC16_Dictionary);
+                w.write_u8(TC16_Byte);
+                w.write_u8(TC16_Unknown);
                 w.write_u16_be(static_cast<uint16_t>(a.size()));
                 for (const auto& [k, val] : a) {
                     w.write_u8(k);
@@ -219,7 +219,7 @@ std::expected<void, Error> GpBinaryV16::EncodeValue(ByteWriter& w, const Value& 
                 return {};
             } else if constexpr (std::is_same_v<T, std::shared_ptr<Hashtable>>) {
                 // hashtable: 'h' + u16 count + (key,value) objects
-                w.write_u8(TC_Hashtable);
+                w.write_u8(TC16_Hashtable);
                 if (!a) {
                     w.write_u16_be(0);
                     return {};
@@ -245,7 +245,7 @@ std::expected<void, Error> GpBinaryV16::EncodeValue(ByteWriter& w, const Value& 
                 if (!ok)
                     return std::unexpected(ok.error());
 
-                w.write_u8(TC_Custom);
+                w.write_u8(TC16_Custom);
                 w.write_u8(a.custom_code);
                 w.write_u16_be(static_cast<uint16_t>(a.data.size()));
                 w.write_bytes(a.data);
@@ -258,38 +258,38 @@ std::expected<void, Error> GpBinaryV16::EncodeValue(ByteWriter& w, const Value& 
                 if (!ok)
                     return std::unexpected(ok.error());
 
-                w.write_u8(TC_GenericArray);
+                w.write_u8(TC16_GenericArray);
                 w.write_u16_be(static_cast<uint16_t>(a.size()));
 
                 if constexpr (std::is_same_v<T, std::string>) {
-                    w.write_u8(TC_String);
+                    w.write_u8(TC16_String);
                     for (const auto& s : a) {
                         auto encs = write_string_u16(w, s);
                         if (!encs)
                             return std::unexpected(encs.error());
                     }
                 } else if constexpr (std::is_same_v<T, std::vector<bool>>) {
-                    w.write_u8(TC_Boolean);
+                    w.write_u8(TC16_Boolean);
                     for (bool b : a)
                         w.write_u8(b ? 1 : 0);
                 } else if constexpr (std::is_same_v<T, std::vector<int16_t>>) {
-                    w.write_u8(TC_Int16);
+                    w.write_u8(TC16_Int16);
                     for (int16_t x : a)
                         w.write_i16_be(x);
                 } else if constexpr (std::is_same_v<T, std::vector<int32_t>>) {
-                    w.write_u8(TC_Int32);
+                    w.write_u8(TC16_Int32);
                     for (int32_t x : a)
                         w.write_i32_be(x);
                 } else if constexpr (std::is_same_v<T, std::vector<int64_t>>) {
-                    w.write_u8(TC_Int64);
+                    w.write_u8(TC16_Int64);
                     for (int64_t x : a)
                         w.write_i64_be(x);
                 } else if constexpr (std::is_same_v<T, std::vector<float>>) {
-                    w.write_u8(TC_Float);
+                    w.write_u8(TC16_Float);
                     for (float x : a)
                         w.write_f32_be(x);
                 } else if constexpr (std::is_same_v<T, std::vector<double>>) {
-                    w.write_u8(TC_Double);
+                    w.write_u8(TC16_Double);
                     for (double x : a)
                         w.write_f64_be(x);
 
@@ -315,11 +315,11 @@ std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) c
     uint8_t t = *tc;
 
     switch (t) {
-    case TC_Unknown:
-    case TC_Null:
+    case TC16_Unknown:
+    case TC16_Null:
         return Value(std::monostate{});
 
-    case TC_Boolean: {
+    case TC16_Boolean: {
         auto b = r.read_u8();
         if (!b)
             return std::unexpected(b.error());
@@ -328,56 +328,56 @@ std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) c
         return Value(*b == 1);
     }
 
-    case TC_Byte: {
+    case TC16_Byte: {
         auto b = r.read_u8();
         if (!b)
             return std::unexpected(b.error());
         return Value(*b);
     }
 
-    case TC_Int16: {
+    case TC16_Int16: {
         auto v = r.read_i16_be();
         if (!v)
             return std::unexpected(v.error());
         return Value(*v);
     }
 
-    case TC_Int32: {
+    case TC16_Int32: {
         auto v = r.read_i32_be();
         if (!v)
             return std::unexpected(v.error());
         return Value(*v);
     }
 
-    case TC_Int64: {
+    case TC16_Int64: {
         auto v = r.read_i64_be();
         if (!v)
             return std::unexpected(v.error());
         return Value(*v);
     }
 
-    case TC_Float: {
+    case TC16_Float: {
         auto v = r.read_f32_be();
         if (!v)
             return std::unexpected(v.error());
         return Value(*v);
     }
 
-    case TC_Double: {
+    case TC16_Double: {
         auto v = r.read_f64_be();
         if (!v)
             return std::unexpected(v.error());
         return Value(*v);
     }
 
-    case TC_String: {
+    case TC16_String: {
         auto s = read_string_u16(r);
         if (!s)
             return std::unexpected(s.error());
         return Value(std::move(*s));
     }
 
-    case TC_ByteArray: {
+    case TC16_ByteArray: {
         auto len = r.read_u32_be();
         if (!len)
             return std::unexpected(len.error());
@@ -389,7 +389,7 @@ std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) c
         return Value(ByteArray(bytes->begin(), bytes->end()));
     }
 
-    case TC_IntArray: {
+    case TC16_IntArray: {
         auto count = r.read_u16_be();
         if (!count)
             return std::unexpected(count.error());
@@ -405,7 +405,7 @@ std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) c
         return Value(std::move(out));
     }
 
-    case TC_StringArray: {
+    case TC16_StringArray: {
         auto count = r.read_u16_be();
         if (!count)
             return std::unexpected(count.error());
@@ -421,7 +421,7 @@ std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) c
         return Value(std::move(out));
     }
 
-    case TC_ObjectArray: {
+    case TC16_ObjectArray: {
         auto count = r.read_u16_be();
         if (!count)
             return std::unexpected(count.error());
@@ -437,7 +437,7 @@ std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) c
         return Value(std::move(out));
     }
 
-    case TC_GenericArray: {
+    case TC16_GenericArray: {
         auto count = r.read_u16_be();
         if (!count)
             return std::unexpected(count.error());
@@ -450,7 +450,7 @@ std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) c
         uint8_t elem_tc = *et;
 
         // If element type is unknown/null, elements are individually typed.
-        if (elem_tc == TC_Unknown || elem_tc == TC_Null) {
+        if (elem_tc == TC16_Unknown || elem_tc == TC16_Null) {
             ObjectArray out;
             out.reserve(n);
             for (uint32_t i = 0; i < n; ++i) {
@@ -463,7 +463,7 @@ std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) c
         }
 
         switch (elem_tc) {
-        case TC_Boolean: {
+        case TC16_Boolean: {
             std::vector<bool> out;
             out.resize(n);
             for (uint32_t i = 0; i < n; ++i) {
@@ -476,7 +476,7 @@ std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) c
             }
             return Value(std::move(out));
         }
-        case TC_Int16: {
+        case TC16_Int16: {
             std::vector<int16_t> out;
             out.reserve(n);
             for (uint32_t i = 0; i < n; ++i) {
@@ -487,7 +487,7 @@ std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) c
             }
             return Value(std::move(out));
         }
-        case TC_Int32: {
+        case TC16_Int32: {
             std::vector<int32_t> out;
             out.reserve(n);
             for (uint32_t i = 0; i < n; ++i) {
@@ -498,7 +498,7 @@ std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) c
             }
             return Value(std::move(out));
         }
-        case TC_Int64: {
+        case TC16_Int64: {
             std::vector<int64_t> out;
             out.reserve(n);
             for (uint32_t i = 0; i < n; ++i) {
@@ -509,7 +509,7 @@ std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) c
             }
             return Value(std::move(out));
         }
-        case TC_Float: {
+        case TC16_Float: {
             std::vector<float> out;
             out.reserve(n);
             for (uint32_t i = 0; i < n; ++i) {
@@ -520,7 +520,7 @@ std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) c
             }
             return Value(std::move(out));
         }
-        case TC_Double: {
+        case TC16_Double: {
             std::vector<double> out;
             out.reserve(n);
             for (uint32_t i = 0; i < n; ++i) {
@@ -531,7 +531,7 @@ std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) c
             }
             return Value(std::move(out));
         }
-        case TC_String: {
+        case TC16_String: {
             std::vector<std::string> out;
             out.reserve(n);
             for (uint32_t i = 0; i < n; ++i) {
@@ -547,7 +547,7 @@ std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) c
         }
     }
 
-    case TC_Dictionary: {
+    case TC16_Dictionary: {
         // Dictionary header: keyType + valueType
         auto kt = r.read_u8();
         if (!kt)
@@ -561,7 +561,7 @@ std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) c
             return std::unexpected(count.error());
 
         // This implementation only supports Dictionary<byte, object>
-        if (*kt != TC_Byte)
+        if (*kt != TC16_Byte)
             return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "only dictionary<byte,*> supported"});
         (void)vt; // ignored; values are decoded as typed objects
 
@@ -579,7 +579,7 @@ std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) c
         return Value(std::move(out));
     }
 
-    case TC_Hashtable: {
+    case TC16_Hashtable: {
         auto count = r.read_u16_be();
         if (!count)
             return std::unexpected(count.error());
@@ -597,7 +597,7 @@ std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) c
         return Value(ht);
     }
 
-    case TC_Custom: {
+    case TC16_Custom: {
         auto code = r.read_u8();
         if (!code)
             return std::unexpected(code.error());
@@ -668,12 +668,12 @@ std::expected<ByteArray, Error> GpBinaryV16::Serialize(const Message& message) {
                 payload.write_i16_be(m.return_code);
 
                 if (m.debug_message.has_value()) {
-                    payload.write_u8(TC_String);
+                    payload.write_u8(TC16_String);
                     auto ws = write_string_u16(payload, *m.debug_message);
                     if (!ws)
                         return std::unexpected(ws.error());
                 } else {
-                    payload.write_u8(TC_Null);
+                    payload.write_u8(TC16_Null);
                 }
 
                 return encode_parameters(payload, m.parameters, 0);
@@ -686,12 +686,12 @@ std::expected<ByteArray, Error> GpBinaryV16::Serialize(const Message& message) {
                 payload.write_i16_be(m.code);
 
                 if (m.message.has_value()) {
-                    payload.write_u8(TC_String);
+                    payload.write_u8(TC16_String);
                     auto ws = write_string_u16(payload, *m.message);
                     if (!ws)
                         return std::unexpected(ws.error());
                 } else {
-                    payload.write_u8(TC_Null);
+                    payload.write_u8(TC16_Null);
                 }
 
                 return encode_parameters(payload, m.parameters, 0);
@@ -705,12 +705,12 @@ std::expected<ByteArray, Error> GpBinaryV16::Serialize(const Message& message) {
                 payload.write_i16_be(m.return_code);
 
                 if (m.debug_message.has_value()) {
-                    payload.write_u8(TC_String);
+                    payload.write_u8(TC16_String);
                     auto ws = write_string_u16(payload, *m.debug_message);
                     if (!ws)
                         return std::unexpected(ws.error());
                 } else {
-                    payload.write_u8(TC_Null);
+                    payload.write_u8(TC16_Null);
                 }
 
                 return encode_parameters(payload, m.parameters, 0);
@@ -877,12 +877,12 @@ std::expected<Message, Error> GpBinaryV16::Deserialize(std::span<const uint8_t> 
             return std::unexpected(debug_type.error());
 
         std::optional<std::string> debug_message;
-        if (*debug_type == TC_String) {
+        if (*debug_type == TC16_String) {
             auto s = read_string_u16(r);
             if (!s)
                 return std::unexpected(s.error());
             debug_message = std::move(*s);
-        } else if (*debug_type == TC_Null || *debug_type == TC_Unknown) {
+        } else if (*debug_type == TC16_Null || *debug_type == TC16_Unknown) {
             debug_message.reset();
         } else {
             return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "invalid debug type"});
@@ -926,12 +926,12 @@ std::expected<Message, Error> GpBinaryV16::Deserialize(std::span<const uint8_t> 
             return std::unexpected(msg_type.error());
 
         std::optional<std::string> msg;
-        if (*msg_type == TC_String) {
+        if (*msg_type == TC16_String) {
             auto s = read_string_u16(r);
             if (!s)
                 return std::unexpected(s.error());
             msg = std::move(*s);
-        } else if (*msg_type == TC_Null || *msg_type == TC_Unknown) {
+        } else if (*msg_type == TC16_Null || *msg_type == TC16_Unknown) {
             msg.reset();
         } else {
             return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "disconnect invalid message type"});

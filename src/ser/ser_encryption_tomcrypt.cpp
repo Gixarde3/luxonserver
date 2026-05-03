@@ -22,29 +22,28 @@ extern ltc_math_descriptor ltc_mp;
 }
 
 namespace luxon::ser {
-static std::string ltc_err_msg(int err, const char* context) {
-    const char* s = error_to_string(err);
+static std::string ltc_err_msg(int err, const char *context) {
+    const char *s = error_to_string(err);
     std::string msg = (s && *s) ? s : "unknown LibTomCrypt error";
     return std::string(context) + ": " + msg + " (err=" + std::to_string(err) + ")";
 }
 
-static void secure_zero(void* p, size_t n) {
-    if (p && n) zeromem(p, n);
+static void secure_zero(void *p, size_t n) {
+    if (p && n)
+        zeromem(p, n);
 }
 
 // RFC 2409 Oakley Group 1 (768-bit)
-static constexpr std::array<uint8_t, 96> Oakley768 = {
-    255, 255, 255, 255, 255, 255, 255, 255, 201, 15,  218, 162, 33,  104, 194, 52,
-    196, 198, 98,  139, 128, 220, 28,  209, 41,  2,   78,  8,   138, 103, 204, 116,
-    2,   11,  190, 166, 59,  19,  155, 34,  81,  74,  8,   121, 142, 52,  4,   221,
-    239, 149, 25,  179, 205, 58,  67,  27,  48,  43,  10,  109, 242, 95,  20,  55,
-    79,  225, 53,  109, 109, 81,  194, 69,  228, 133, 181, 118, 98,  94,  126, 198,
-    244, 76,  66,  233, 166, 58,  54,  32,  255, 255, 255, 255, 255, 255, 255, 255
-};
+static constexpr std::array<uint8_t, 96> Oakley768 = {255, 255, 255, 255, 255, 255, 255, 255, 201, 15,  218, 162, 33,  104, 194, 52,  196, 198, 98,  139,
+                                                      128, 220, 28,  209, 41,  2,   78,  8,   138, 103, 204, 116, 2,   11,  190, 166, 59,  19,  155, 34,
+                                                      81,  74,  8,   121, 142, 52,  4,   221, 239, 149, 25,  179, 205, 58,  67,  27,  48,  43,  10,  109,
+                                                      242, 95,  20,  55,  79,  225, 53,  109, 109, 81,  194, 69,  228, 133, 181, 118, 98,  94,  126, 198,
+                                                      244, 76,  66,  233, 166, 58,  54,  32,  255, 255, 255, 255, 255, 255, 255, 255};
 static constexpr unsigned OakleyGen = 22;
 
 static void ensure_ltc_registered() {
-    [[maybe_unused]] static const bool once = []() {
+    [[maybe_unused]]
+    static const bool once = []() {
         // Make sure LibTomCrypt uses LibTomMath (if that’s your build)
         ltc_mp = ltm_desc;
 
@@ -63,31 +62,36 @@ static void ensure_ltc_registered() {
     }();
 }
 
-static bool pkcs7_pad(const uint8_t* in, size_t in_len, size_t block, std::vector<uint8_t>& out) {
-    if (block == 0 || block > 255) return false;
+static bool pkcs7_pad(const uint8_t *in, size_t in_len, size_t block, std::vector<uint8_t>& out) {
+    if (block == 0 || block > 255)
+        return false;
     const size_t pad = block - (in_len % block);
     out.resize(in_len + pad);
-    if (in_len) std::memcpy(out.data(), in, in_len);
+    if (in_len)
+        std::memcpy(out.data(), in, in_len);
     std::memset(out.data() + in_len, static_cast<int>(pad), pad);
     return true;
 }
 
 static bool pkcs7_unpad(std::vector<uint8_t>& buf, size_t block) {
-    if (block == 0 || block > 255) return false;
-    if (buf.empty() || (buf.size() % block) != 0) return false;
+    if (block == 0 || block > 255)
+        return false;
+    if (buf.empty() || (buf.size() % block) != 0)
+        return false;
 
     const uint8_t pad = buf.back();
-    if (pad == 0 || pad > block || pad > buf.size()) return false;
+    if (pad == 0 || pad > block || pad > buf.size())
+        return false;
 
     for (size_t i = 0; i < pad; ++i) {
-        if (buf[buf.size() - 1 - i] != pad) return false;
+        if (buf[buf.size() - 1 - i] != pad)
+            return false;
     }
     buf.resize(buf.size() - pad);
     return true;
 }
 
-static std::expected<ByteArray, Error>
-aes_256_cbc_crypt(bool encrypt, std::span<const uint8_t> in, const std::array<uint8_t, 32>& key) {
+static std::expected<ByteArray, Error> aes_256_cbc_crypt(bool encrypt, std::span<const uint8_t> in, const std::array<uint8_t, 32>& key) {
     const int cipher_idx = find_cipher("aes");
     if (cipher_idx < 0) {
         return std::unexpected(Error{.code = Error::Code::CryptoError, .message = "AES cipher not registered in LibTomCrypt"});
@@ -185,12 +189,15 @@ std::expected<void, Error> CryptoContext::ensure_rng_ready() {
     if (!impl_) {
         return std::unexpected(Error{.code = Error::Code::CryptoNotReady, .message = "Crypto context uninitialized"});
     }
-    if (impl_->rng_ready) return {};
+    if (impl_->rng_ready)
+        return {};
 
     // Prefer Fortuna if available, else Yarrow, else sprng
     impl_->prng_idx = find_prng("fortuna");
-    if (impl_->prng_idx < 0) impl_->prng_idx = find_prng("yarrow");
-    if (impl_->prng_idx < 0) impl_->prng_idx = find_prng("sprng");
+    if (impl_->prng_idx < 0)
+        impl_->prng_idx = find_prng("yarrow");
+    if (impl_->prng_idx < 0)
+        impl_->prng_idx = find_prng("sprng");
 
     if (impl_->prng_idx < 0) {
         impl_->rng_error = "no supported PRNG registered (need fortuna/yarrow/sprng enabled in LibTomCrypt)";
@@ -256,10 +263,12 @@ std::expected<void, Error> CryptoContext::ensure_dh_keypair() {
     if (!impl_) {
         return std::unexpected(Error{.code = Error::Code::CryptoNotReady, .message = "Crypto context uninitialized"});
     }
-    if (impl_->dh_ready) return {};
+    if (impl_->dh_ready)
+        return {};
 
     auto rng = ensure_rng_ready();
-    if (!rng) return std::unexpected(rng.error());
+    if (!rng)
+        return std::unexpected(rng.error());
 
     // Clean reset to ensure fresh state on retry
     if (impl_->dh_ready) {
@@ -268,13 +277,9 @@ std::expected<void, Error> CryptoContext::ensure_dh_keypair() {
     }
     std::memset(&impl_->dh, 0, sizeof(impl_->dh));
 
-    const uint8_t g_bytes[1] = { static_cast<uint8_t>(OakleyGen) };
+    const uint8_t g_bytes[1] = {static_cast<uint8_t>(OakleyGen)};
 
-    int ret = dh_set_pg(Oakley768.data(),
-                        static_cast<unsigned long>(Oakley768.size()),
-                        g_bytes,
-                        static_cast<unsigned long>(sizeof(g_bytes)),
-                        &impl_->dh);
+    int ret = dh_set_pg(Oakley768.data(), static_cast<unsigned long>(Oakley768.size()), g_bytes, static_cast<unsigned long>(sizeof(g_bytes)), &impl_->dh);
     if (ret != CRYPT_OK) {
         return std::unexpected(Error{.code = Error::Code::DhError, .message = ltc_err_msg(ret, "dh_set_pg failed")});
     }
@@ -292,10 +297,11 @@ std::expected<void, Error> CryptoContext::ensure_dh_keypair() {
 
 std::expected<ByteArray, Error> CryptoContext::GetOrCreateDhPublicKey() {
     auto dh = ensure_dh_keypair();
-    if (!dh) return std::unexpected(dh.error());
+    if (!dh)
+        return std::unexpected(dh.error());
 
     // LibTomCrypt dh_key stores mp_int* as void* when using LibTomMath
-    mp_int* y = reinterpret_cast<mp_int*>(impl_->dh.y);
+    mp_int *y = reinterpret_cast<mp_int *>(impl_->dh.y);
     if (!y) {
         return std::unexpected(Error{.code = Error::Code::DhError, .message = "DH public value missing"});
     }
@@ -326,10 +332,11 @@ std::expected<void, Error> CryptoContext::DeriveFromPeerPublicKey(std::span<cons
     }
 
     auto dh = ensure_dh_keypair();
-    if (!dh) return std::unexpected(dh.error());
+    if (!dh)
+        return std::unexpected(dh.error());
 
-    mp_int* p = reinterpret_cast<mp_int*>(impl_->dh.prime);
-    mp_int* x = reinterpret_cast<mp_int*>(impl_->dh.x);
+    mp_int *p = reinterpret_cast<mp_int *>(impl_->dh.prime);
+    mp_int *x = reinterpret_cast<mp_int *>(impl_->dh.x);
     if (!p || !x) {
         return std::unexpected(Error{.code = Error::Code::DhError, .message = "DH internal state incomplete"});
     }
@@ -346,9 +353,7 @@ std::expected<void, Error> CryptoContext::DeriveFromPeerPublicKey(std::span<cons
     };
 
     // Import peer public key
-    if (mp_read_unsigned_bin(&peerY,
-                            const_cast<unsigned char*>(peer_public_key.data()),
-                            static_cast<int>(peer_public_key.size())) != MP_OKAY) {
+    if (mp_read_unsigned_bin(&peerY, const_cast<unsigned char *>(peer_public_key.data()), static_cast<int>(peer_public_key.size())) != MP_OKAY) {
         cleanup();
         return std::unexpected(Error{.code = Error::Code::DhError, .message = "mp_read_unsigned_bin(peerY) failed"});
     }
@@ -408,7 +413,7 @@ std::expected<void, Error> CryptoContext::DeriveFromPeerPublicKey(std::span<cons
         first_nonzero++;
     }
 
-    const uint8_t* secret_ptr = secret_fixed.data() + first_nonzero;
+    const uint8_t *secret_ptr = secret_fixed.data() + first_nonzero;
     size_t secret_len = secret_fixed.size() - first_nonzero;
 
     uint8_t zero = 0x00;
@@ -427,11 +432,7 @@ std::expected<void, Error> CryptoContext::DeriveFromPeerPublicKey(std::span<cons
 
     std::array<uint8_t, 32> hash{};
     unsigned long outlen = static_cast<unsigned long>(hash.size());
-    const int hret = hash_memory(hash_idx,
-                                secret_ptr,
-                                static_cast<unsigned long>(secret_len),
-                                hash.data(),
-                                &outlen);
+    const int hret = hash_memory(hash_idx, secret_ptr, static_cast<unsigned long>(secret_len), hash.data(), &outlen);
 
     secure_zero(secret_fixed.data(), secret_fixed.size());
     cleanup();
