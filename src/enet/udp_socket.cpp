@@ -221,6 +221,9 @@ bool UdpSocket::connect_to(const std::string& host, uint16_t port) {
     sa4.sin_port = htons(port);
 #ifdef HAS_PTON
     if (inet_pton(AF_INET, host.c_str(), &sa4.sin_addr) == 1) {
+#elif defined(_WIN32)
+    sa4.sin_addr.s_addr = inet_addr(host.c_str());
+    if (sa4.sin_addr.s_addr != INADDR_NONE || host == "255.255.255.255") {
 #else
     if (inet_aton(host.c_str(), &sa4.sin_addr) != 0) {
 #endif
@@ -248,7 +251,14 @@ bool UdpSocket::connect_to(const std::string& host, uint16_t port) {
     sockaddr_in6 sa6{};
     sa6.sin6_family = AF_INET6;
     sa6.sin6_port = htons(port);
+#ifdef HAS_PTON
     if (inet_pton(AF_INET6, host.c_str(), &sa6.sin6_addr) == 1) {
+#elif defined(_WIN32)
+    int sa6len = sizeof(sa6);
+    if (WSAStringToAddressA(const_cast<LPSTR>(host.c_str()), AF_INET6, nullptr, reinterpret_cast<sockaddr *>(&sa6), &sa6len) == 0) {
+#else
+    if (false) {
+#endif
         std::memcpy(&ss, &sa6, sizeof(sa6));
         slen = sizeof(sa6);
 #ifdef _WIN32

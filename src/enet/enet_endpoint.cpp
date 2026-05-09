@@ -29,6 +29,10 @@ std::optional<EnetEndpoint> EnetEndpoint::from(const char *host, uint16_t port) 
     sa4.sin_port = htons(port);
 #ifdef HAS_PTON
     if (inet_pton(AF_INET, host, &sa4.sin_addr) == 1) {
+#elif defined(_WIN32)
+    sa4.sin_addr.s_addr = inet_addr(host);
+    // inet_addr returns INADDR_NONE (0xFFFFFFFF) on failure, which is also the broadcast address
+    if (sa4.sin_addr.s_addr != INADDR_NONE || std::strcmp(host, "255.255.255.255") == 0) {
 #else
     if (inet_aton(host, &sa4.sin_addr) != 0) {
 #endif
@@ -41,7 +45,15 @@ std::optional<EnetEndpoint> EnetEndpoint::from(const char *host, uint16_t port) 
     sockaddr_in6 sa6{};
     sa6.sin6_family = AF_INET6;
     sa6.sin6_port = htons(port);
+#ifdef HAS_PTON
     if (inet_pton(AF_INET6, host, &sa6.sin6_addr) == 1) {
+#elif defined(_WIN32)
+    int sa6len = sizeof(sa6);
+    // WSAStringToAddressA is available since Windows 2000 and handles both v4 and v6
+    if (WSAStringToAddressA(const_cast<LPSTR>(host), AF_INET6, nullptr, reinterpret_cast<sockaddr *>(&sa6), &sa6len) == 0) {
+#else
+    if (false) { // Fallback for platforms missing both inet_pton and Win32 APIs
+#endif
         std::memcpy(&ss, &sa6, sizeof(sa6));
         slen = sizeof(sa6);
     }
