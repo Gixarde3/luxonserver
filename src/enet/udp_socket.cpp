@@ -14,7 +14,7 @@
 #include <netdb.h>
 #endif
 
-#ifdef __wasm__
+#ifdef __wasi__
 #define FCNTL socket_fcntl
 #else
 #define FCNTL fcntl
@@ -141,7 +141,7 @@ void UdpSocket::close() {
     }
 #else
     if (sock_ >= 0) {
-#ifdef __wasm__
+#ifdef __wasi__
         ::socket_close(sock_);
 #else
         ::close(sock_);
