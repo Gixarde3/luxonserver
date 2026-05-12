@@ -79,6 +79,12 @@ else()
     endif()
 endif()
 
+# WASM Sockets library
+if (WASI)
+    add_library(wasm_sockets INTERFACE)
+    target_include_directories(wasm_sockets INTERFACE include/wasm_sockets)
+endif()
+
 # Platform socket libs
 set(LUXON_PLATFORM_LIBS "")
 if(WIN32)
@@ -130,6 +136,10 @@ add_library(luxon_enet
 if (MSVC)
     target_compile_definitions(luxon_enet PRIVATE NOMINMAX)
     target_compile_definitions(luxon_ser PUBLIC NOMINMAX)
+endif()
+
+if (WASI)
+    target_link_libraries(luxon_enet PRIVATE wasm_sockets)
 endif()
 
 target_link_libraries(luxon_enet PUBLIC

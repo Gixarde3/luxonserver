@@ -134,7 +134,11 @@ void UdpSocket::close() {
     }
 #else
     if (sock_ >= 0) {
+#ifdef __WASM__
+        ::socket_close(sock_);
+#else
         ::close(sock_);
+#endif
         sock_ = -1;
     }
 #endif
