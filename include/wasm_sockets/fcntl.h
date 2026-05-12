@@ -10,6 +10,8 @@
 extern "C" {
 #endif
 
+#define O_NONBLOCK 0x00000800
+
 /* Non-standard on purpose: avoids conflict with WASI/libc fcntl(). */
 int socket_fcntl(int fd, int cmd, int arg) __WASM_SOCKET_IMPORT("socket_fcntl");
 
