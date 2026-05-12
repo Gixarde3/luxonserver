@@ -1,5 +1,5 @@
-#ifndef _SYS_TYPES_H
-#define _SYS_TYPES_H
+#ifndef WASM_SOCKET_SYS_TYPES_H
+#define WASM_SOCKET_SYS_TYPES_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -17,4 +17,4 @@ typedef ptrdiff_t ssize_t;
 }
 #endif
 
-#endif /* _SYS_TYPES_H */
+#endif /* WASM_SOCKET_SYS_TYPES_H */

@@ -1,5 +1,5 @@
-#ifndef _SYS_IOCTL_H
-#define _SYS_IOCTL_H
+#ifndef WASM_SOCKET_SYS_IOCTL_H
+#define WASM_SOCKET_SYS_IOCTL_H
 
 #include <stdarg.h>
 
@@ -27,4 +27,4 @@ static inline int ioctl(int fd, unsigned long request, ...) {
 }
 #endif
 
-#endif /* _SYS_IOCTL_H */
+#endif /* WASM_SOCKET_SYS_IOCTL_H */

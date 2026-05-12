@@ -1,5 +1,5 @@
-#ifndef _NETINET_IN_H
-#define _NETINET_IN_H
+#ifndef WASM_SOCKET_NETINET_IN_H
+#define WASM_SOCKET_NETINET_IN_H
 
 #include <stdint.h>
 
@@ -72,4 +72,4 @@ static inline uint32_t ntohl(uint32_t x) {
 }
 #endif
 
-#endif /* _NETINET_IN_H */
+#endif /* WASM_SOCKET_NETINET_IN_H */

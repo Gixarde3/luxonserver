@@ -1,5 +1,5 @@
-#ifndef _SYS_SOCKET_H
-#define _SYS_SOCKET_H
+#ifndef WASM_SOCKET_SYS_SOCKET_H
+#define WASM_SOCKET_SYS_SOCKET_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -125,4 +125,4 @@ int socket_close(int sockfd)
 }
 #endif
 
-#endif /* _SYS_SOCKET_H */
+#endif /* WASM_SOCKET_SYS_SOCKET_H */

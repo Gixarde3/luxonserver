@@ -1,5 +1,5 @@
-#ifndef _SYS_SELECT_H
-#define _SYS_SELECT_H
+#ifndef WASM_SOCKET_SYS_SELECT_H
+#define WASM_SOCKET_SYS_SELECT_H
 
 #include <stdint.h>
 #include <string.h>
@@ -44,4 +44,4 @@ int select(int nfds,
 }
 #endif
 
-#endif /* _SYS_SELECT_H */
+#endif /* WASM_SOCKET_SYS_SELECT_H */

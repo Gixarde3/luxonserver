@@ -1,5 +1,5 @@
-#ifndef _ARPA_INET_H
-#define _ARPA_INET_H
+#ifndef WASM_SOCKET_ARPA_INET_H
+#define WASM_SOCKET_ARPA_INET_H
 
 #include <stdint.h>
 
@@ -52,4 +52,4 @@ static inline char *inet_ntoa(struct in_addr in) {
 }
 #endif
 
-#endif /* _ARPA_INET_H */
+#endif /* WASM_SOCKET_ARPA_INET_H */

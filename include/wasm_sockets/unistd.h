@@ -1,6 +1,6 @@
 #include_next <unistd.h>
 
-#ifndef _UNISTD_H
+#ifndef WASM_SOCKET_UNISTD_H
 #define _UNISTD_H
 
 #include <bits/wasm_socket_import.h>
@@ -17,4 +17,4 @@ int socket_close(int fd)
 }
 #endif
 
-#endif /* _UNISTD_H */
+#endif /* WASM_SOCKET_UNISTD_H */

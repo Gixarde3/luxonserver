@@ -1,5 +1,5 @@
-#ifndef _NETDB_H
-#define _NETDB_H
+#ifndef WASM_SOCKET_NETDB_H
+#define WASM_SOCKET_NETDB_H
 
 #include <sys/socket.h>
 #include <bits/wasm_socket_import.h>
@@ -40,4 +40,4 @@ void freeaddrinfo(struct addrinfo *res)
 }
 #endif
 
-#endif /* _NETDB_H */
+#endif /* WASM_SOCKET_NETDB_H */

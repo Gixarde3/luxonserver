@@ -4,6 +4,7 @@
 #include "enet_peer.hpp"
 
 #include <cstring>
+#include <fcntl.h>
 #include <random>
 #include <algorithm>
 #ifndef _WIN32
@@ -11,6 +12,12 @@
 #endif
 #ifdef HAS_NETDB
 #include <netdb.h>
+#endif
+
+#ifdef __wasm__
+#define FCNTL socket_fcntl
+#else
+#define FCNTL fcntl
 #endif
 
 namespace luxon {
@@ -134,7 +141,7 @@ void UdpSocket::close() {
     }
 #else
     if (sock_ >= 0) {
-#ifdef __WASM__
+#ifdef __wasm__
         ::socket_close(sock_);
 #else
         ::close(sock_);
@@ -150,14 +157,14 @@ void UdpSocket::set_nonblocking(bool nb) {
     u_long mode = nb ? 1 : 0;
     ioctlsocket(sock_, FIONBIO, &mode);
 #else
-    int flags = fcntl(sock_, F_GETFL, 0);
+    int flags = FCNTL(sock_, F_GETFL, 0);
     if (flags < 0)
         return;
     if (nb)
         flags |= O_NONBLOCK;
     else
         flags &= ~O_NONBLOCK;
-    fcntl(sock_, F_SETFL, flags);
+    FCNTL(sock_, F_SETFL, flags);
 #endif
 }
 
