@@ -4,6 +4,7 @@
 #include "ser_interface.hpp"
 #include "ser_gp_binary_v16.hpp"
 #include "ser_gp_binary_v18.hpp"
+#include "ser_ipc_binary.hpp"
 
 namespace luxon::ser {
 std::expected<ByteArray, Error> IProtocol::CreateInitEncryptionRequest() {

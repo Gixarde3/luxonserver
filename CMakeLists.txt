@@ -131,6 +131,8 @@ add_library(luxon_enet
     src/enet/enet_channel.cpp
     src/enet/enet_peer_core.cpp
     src/enet/enet_server.cpp
+    include/luxon/ser_ipc_binary.hpp
+    src/ser/ser_ipc_binary.cpp
 )
 
 if (MSVC)
