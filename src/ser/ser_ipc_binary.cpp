@@ -9,7 +9,7 @@ ProtocolImplID IPCBinaryProtocol::GetProtcolImplID() { return ProtocolImplID::IP
 std::expected<ByteArray, Error> IPCBinaryProtocol::Serialize(const Message& message) {
     ByteWriter w;
 
-    w.write_u8(GP_MAGIC);
+    w.write_u8(0xF5);
     w.write_u8(static_cast<uint8_t>(message.index())); // Message variant index
     w.write_u8(message.encrypted ? 1 : 0);             // Carry encrypted flag
 
