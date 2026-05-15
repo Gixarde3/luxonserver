@@ -11,12 +11,47 @@
 
 namespace luxon {
 namespace enet {
+
+static bool extract_normalized_v4(const sockaddr_storage& ss, uint32_t& ip, uint16_t& port) {
+    if (ss.ss_family == AF_INET) {
+        const auto *sa = reinterpret_cast<const sockaddr_in *>(&ss);
+        ip = sa->sin_addr.s_addr;
+        port = sa->sin_port;
+        return true;
+    }
+#ifdef HAS_SOCKADDR_IN6
+    if (ss.ss_family == AF_INET6) {
+        const auto *sa6 = reinterpret_cast<const sockaddr_in6 *>(&ss);
+        const uint8_t *raw = sa6->sin6_addr.s6_addr;
+        bool mapped = true;
+        for (int i = 0; i < 10; ++i)
+            if (raw[i] != 0)
+                mapped = false;
+        if (raw[10] != 0xff || raw[11] != 0xff)
+            mapped = false;
+        if (mapped) {
+            std::memcpy(&ip, &raw[12], 4);
+            port = sa6->sin6_port;
+            return true;
+        }
+    }
+#endif
+    return false;
+}
+
 static bool sockaddr_equal(const sockaddr_storage& a, socklen_t alen, const sockaddr_storage& b, socklen_t blen) {
-    if (alen != blen)
-        return false;
-    if (a.ss_family != b.ss_family)
-        return false;
-    return std::memcmp(&a, &b, alen) == 0;
+    // Fast path
+    if (alen == blen && a.ss_family == b.ss_family) {
+        return std::memcmp(&a, &b, alen) == 0;
+    }
+
+    // Slow path: cross-family IPv4 and IPv4-mapped IPv6 equality check
+    uint32_t ipA = 0, ipB = 0;
+    uint16_t portA = 0, portB = 0;
+    if (extract_normalized_v4(a, ipA, portA) && extract_normalized_v4(b, ipB, portB))
+        return ipA == ipB && portA == portB;
+
+    return false;
 }
 
 std::optional<EnetEndpoint> EnetEndpoint::from(const char *host, uint16_t port) {
@@ -68,9 +103,25 @@ std::optional<EnetEndpoint> EnetEndpoint::from(const char *host, uint16_t port) 
 bool EnetEndpoint::operator==(const EnetEndpoint& o) const { return sockaddr_equal(addr, len, o.addr, o.len); }
 
 bool EnetEndpoint::operator<(const EnetEndpoint& o) const {
+    uint32_t ipA = 0, ipB = 0;
+    uint16_t portA = 0, portB = 0;
+    bool is_v4_A = extract_normalized_v4(addr, ipA, portA);
+    bool is_v4_B = extract_normalized_v4(o.addr, ipB, portB);
+
+    // If both are IPv4 equivalents, sort by normalized value
+    if (is_v4_A && is_v4_B) {
+        if (ipA != ipB)
+            return ipA < ipB;
+        return portA < portB;
+    }
+
+    // Sort families safely
+    if (is_v4_A != is_v4_B)
+        return is_v4_A;
+
+    // Fallback to strict memory comparison
     if (len != o.len)
         return len < o.len;
-
     return std::memcmp(&addr, &o.addr, len) < 0;
 }
 
@@ -90,28 +141,42 @@ std::string EnetEndpoint::to_string() const {
 }
 
 std::size_t EnetEndpointHash::operator()(const EnetEndpoint& ep) const noexcept {
-    // Hash raw bytes (good enough for endpoint keying)
-    const uint8_t *p = reinterpret_cast<const uint8_t *>(&ep.addr);
+    uint32_t ip = 0;
+    uint16_t port = 0;
+
+    const uint8_t *p;
+    size_t len;
+    sockaddr_in norm4{};
+
+    // Normalize IPv4 equivalent addresses so they produce the identical hash!
+    if (extract_normalized_v4(ep.addr, ip, port)) {
+        norm4.sin_family = AF_INET;
+        norm4.sin_port = port;
+        norm4.sin_addr.s_addr = ip;
+        p = reinterpret_cast<const uint8_t *>(&norm4);
+        len = sizeof(norm4);
+    } else {
+        p = reinterpret_cast<const uint8_t *>(&ep.addr);
+        len = ep.len;
+    }
 
     std::size_t h;
     std::size_t prime;
 
     if constexpr (sizeof(std::size_t) == 4) {
-        // 32-bit FNV-1a constants
         h = 2166136261u;
         prime = 16777619u;
     } else {
-        // 64-bit FNV-1a constants
         h = 14695981039346656037ull;
         prime = 1099511628211ull;
     }
 
-    for (size_t i = 0; i < static_cast<size_t>(ep.len); ++i) {
+    for (size_t i = 0; i < len; ++i) {
         h ^= p[i];
         h *= prime;
     }
 
-    h ^= ep.len;
+    h ^= len;
     return h;
 }
 } // namespace enet

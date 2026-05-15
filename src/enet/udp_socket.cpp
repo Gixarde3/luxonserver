@@ -438,12 +438,33 @@ std::optional<EnetEndpoint> UdpSocket::parse_stun_binding_response(DatagramView 
 
         const uint8_t *attr = datagram.data() + offset;
 
-        if (attr_type == kStunAttrXorMappedAddress) {
-            if (auto ep = parse_stun_address_attr(attr, attr_len, true, stun_transaction_id_))
+        if (attr_type == kStunAttrXorMappedAddress || attr_type == kStunAttrMappedAddress) {
+            if (auto ep = parse_stun_address_attr(attr, attr_len, attr_type == kStunAttrXorMappedAddress, stun_transaction_id_)) {
+#ifdef HAS_SOCKADDR_IN6
+                // Upgrade AF_INET to AF_INET6 mapped if the local socket is bound to IPv6
+                if (ep->addr.ss_family == AF_INET && is_open()) {
+                    sockaddr_storage ss{};
+                    socklen_t sslen = sizeof(ss);
+#ifdef _WIN32
+                    if (::getsockname(sock_, reinterpret_cast<sockaddr *>(&ss), &sslen) == 0 && ss.ss_family == AF_INET6) {
+#else
+                    if (::getsockname(sock_, reinterpret_cast<sockaddr *>(&ss), &sslen) == 0 && ss.ss_family == AF_INET6) {
+#endif
+                        const sockaddr_in *sa4 = reinterpret_cast<const sockaddr_in *>(&ep->addr);
+                        sockaddr_in6 sa6{};
+                        sa6.sin6_family = AF_INET6;
+                        sa6.sin6_port = sa4->sin_port;
+                        sa6.sin6_addr.s6_addr[10] = 0xff;
+                        sa6.sin6_addr.s6_addr[11] = 0xff;
+                        std::memcpy(&sa6.sin6_addr.s6_addr[12], &sa4->sin_addr.s_addr, 4);
+
+                        std::memcpy(&ep->addr, &sa6, sizeof(sa6));
+                        ep->len = sizeof(sa6);
+                    }
+                }
+#endif
                 return ep;
-        } else if (attr_type == kStunAttrMappedAddress) {
-            if (auto ep = parse_stun_address_attr(attr, attr_len, false, stun_transaction_id_))
-                return ep;
+            }
         }
 
         offset += attr_len;
