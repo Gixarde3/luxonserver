@@ -114,6 +114,8 @@ int setsockopt(int sockfd,
                socklen_t optlen)
     __WASM_SOCKET_IMPORT("socket_setsockopt");
 
+int getsockname(int sockfd, struct sockaddr *addr, socklen_t *addrlen) __WASM_SOCKET_IMPORT("socket_getsockname");
+
 int shutdown(int sockfd, int how)
     __WASM_SOCKET_IMPORT("socket_shutdown");
 

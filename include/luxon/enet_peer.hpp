@@ -32,8 +32,11 @@
 #include <unistd.h>
 #endif
 
+// Little hack...
+#ifndef HAS_SOCKADDR_IN6
 #ifndef __3DS__
 #define HAS_SOCKADDR_IN6
+#endif
 #endif
 
 namespace luxon {
