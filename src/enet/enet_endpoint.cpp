@@ -131,13 +131,28 @@ std::string EnetEndpoint::to_string() const {
     char serv[NI_MAXSERV]{};
     if (getnameinfo(reinterpret_cast<const sockaddr *>(&addr), len, host, sizeof(host), serv, sizeof(serv), NI_NUMERICHOST | NI_NUMERICSERV) == 0)
         return std::format("{}:{}", host, serv);
-#else
-    const sockaddr_in *sin = reinterpret_cast<const sockaddr_in *>(&addr);
-    char *ip_str = inet_ntoa(sin->sin_addr);
-    if (ip_str)
-        return std::format("{}:{}", ip_str, ntohs(sin->sin_port));
 #endif
-    return "<endpoint>";
+
+    char ip_str[64] = {0}; // Safe buffer for INET6_ADDRSTRLEN
+    uint16_t port = 0;
+
+    if (addr.ss_family == AF_INET) {
+        const sockaddr_in *sin = reinterpret_cast<const sockaddr_in *>(&addr);
+        inet_ntop(AF_INET, &sin->sin_addr, ip_str, sizeof(ip_str));
+        port = ntohs(sin->sin_port);
+    }
+#ifdef HAS_SOCKADDR_IN6
+    else if (addr.ss_family == AF_INET6) {
+        const sockaddr_in6 *sin6 = reinterpret_cast<const sockaddr_in6 *>(&addr);
+        inet_ntop(AF_INET6, &sin6->sin6_addr, ip_str, sizeof(ip_str));
+        port = ntohs(sin6->sin6_port);
+    }
+#endif
+    else {
+        return "<endpoint>";
+    }
+
+    return std::format("{}:{}", ip_str, port);
 }
 
 std::size_t EnetEndpointHash::operator()(const EnetEndpoint& ep) const noexcept {
