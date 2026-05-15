@@ -36,30 +36,6 @@ endif()
 
 check_include_file(netdb.h HAS_NETDB)
 
-check_c_source_compiles("
-    #ifdef _WIN32
-        #include <winsock2.h>
-        #include <ws2tcpip.h>
-    #else
-        #include <sys/types.h>
-        #include <sys/socket.h>
-        #include <netdb.h>
-    #endif
-
-    int main() {
-        struct sockaddr sa;
-        char host[1025];
-        char service[32];
-
-        // We explicitly use the flags here
-        // If they are missing, compilation fails and HAS_GETNAMEINFO becomes false
-        getnameinfo(&sa, sizeof(sa), host, sizeof(host), service, sizeof(service),
-                    NI_NUMERICHOST | NI_NUMERICSERV);
-
-        return 0;
-    }
-" HAS_GETNAMEINFO)
-
 # Encryption library
 option(LUXON_USE_TOMCRYPT "Use bundled tomcrypt for cryptography within Luxon" OFF)
 if (LUXON_USE_TOMCRYPT)
@@ -160,10 +136,6 @@ endif()
 
 if(HAS_PTON)
     target_compile_definitions(luxon_enet PUBLIC LUXON_ENET_HAS_PTON PRIVATE HAS_PTON)
-endif()
-
-if(HAS_GETNAMEINFO)
-    target_compile_definitions(luxon_enet PUBLIC LUXON_ENET_HAS_GETNAMEINFO PRIVATE HAS_GETNAMEINFO)
 endif()
 
 if(HAS_NETDB)

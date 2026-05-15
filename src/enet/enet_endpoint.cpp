@@ -126,13 +126,6 @@ bool EnetEndpoint::operator<(const EnetEndpoint& o) const {
 }
 
 std::string EnetEndpoint::to_string() const {
-#ifdef HAS_GETNAMEINFO
-    char host[NI_MAXHOST]{};
-    char serv[NI_MAXSERV]{};
-    if (getnameinfo(reinterpret_cast<const sockaddr *>(&addr), len, host, sizeof(host), serv, sizeof(serv), NI_NUMERICHOST | NI_NUMERICSERV) == 0)
-        return std::format("{}:{}", host, serv);
-#endif
-
     char ip_str[64] = {0}; // Safe buffer for INET6_ADDRSTRLEN
     uint16_t port = 0;
 
