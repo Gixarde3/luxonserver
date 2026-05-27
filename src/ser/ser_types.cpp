@@ -225,9 +225,8 @@ std::size_t ValueHash::operator()(const Value& v) const noexcept {
 }
 
 const Value& Dictionary::operator[](uint8_t key) const {
-    auto res = find(key);
-    if (res == end())
-        return null;
-    return res->second;
+    if (auto res = find(key); res != end())
+        return res->second;
+    return null;
 }
 } // namespace luxon::ser
