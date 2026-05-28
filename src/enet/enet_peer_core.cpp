@@ -1121,8 +1121,8 @@ bool EnetPeer::service() {
     if (state_ == EnetConnectionState::Disconnected)
         return true;
 
-    // Dispatch limited number of commands
-    int dispatch_limit = cfg_.max_commands_per_service;
+    // Limited number of dispatches
+    int dispatch_limit = cfg_.max_dispatches_per_tick;
     while (dispatch_limit-- > 0 && dispatch_one())
         ;
 
