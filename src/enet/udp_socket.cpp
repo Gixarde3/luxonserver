@@ -192,6 +192,13 @@ bool UdpSocket::bind_any(uint16_t port, bool ipv6) {
     }
 #endif
 
+#if defined(__linux__) || defined(_WIN32) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__APPLE__)
+    // Increase buffer size  TODO: Make this more flexible perhaps?
+    const int buffer_size = 1024 * 1024 * 8; // 8 MB
+    setsockopt(sock_, SOL_SOCKET, SO_RCVBUF, (const char *)&buffer_size, sizeof(buffer_size));
+    setsockopt(sock_, SOL_SOCKET, SO_SNDBUF, (const char *)&buffer_size, sizeof(buffer_size));
+#endif
+
     if (!ipv6) {
         sockaddr_in sa{};
         sa.sin_family = AF_INET;

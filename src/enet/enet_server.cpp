@@ -188,8 +188,13 @@ bool EnetServer::service_peers(uint32_t& timeout_us) {
         // Check if timeout is exceeded
         auto now = std::chrono::steady_clock::now();
         uint32_t elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(now - start_time).count();
-        if (elapsed_us >= timeout_us)
+        if (elapsed_us >= timeout_us) {
+            // Serve starved peers as quickly as possible, just to keep them alive
+            for (int16_t starved_id : service_queue_)
+                if (auto p = find_peer(starved_id))
+                    p->service_fast();
             break;
+        }
     }
 
     // Clean up dead peers

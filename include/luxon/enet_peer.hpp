@@ -69,6 +69,7 @@ struct EnetPeerConfig {
     // Hard rate/size limits
     size_t max_payload_size = 500 * 1024;
     uint32_t max_messages_per_second = 500;
+    uint8_t max_commands_per_service = 16;
 
     // Parse incoming connect command and extract configuration
     void apply_connect_command(const EnetCommand& cmd) {
@@ -233,6 +234,8 @@ public:
 
     // Process timers + resend + ping + send outgoing datagrams
     bool service();
+    // Only send outgoing acks
+    bool service_fast();
 
     // Feed datagrams received from socket. This parses, checks challenge, handles ACKs, handles sequencing and fragmentation
     // and queues payloads for dispatch

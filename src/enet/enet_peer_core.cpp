@@ -5,6 +5,7 @@
 #include "enet_metrics_macros.hpp"
 
 #include <bit>
+#include <format>
 #include <random>
 #include <algorithm>
 #include <chrono>
@@ -733,10 +734,9 @@ void EnetPeer::handle_incoming_packet(const EnetPacketHeader& hdr, std::span<Ene
                 execute_command(c);
             }
         }
-    } catch (const ProtocolError&) {
+    } catch (const ProtocolError& e) {
         ENET_METRIC_ADD(enet.datagram_validation_failures, 1);
-
-        // TODO: Handle this somehow, maybe?
+        on_log_message(LogLevel::Error, std::format("Protocol error: {}", e.what()));
     }
 }
 
@@ -1121,12 +1121,15 @@ bool EnetPeer::service() {
     if (state_ == EnetConnectionState::Disconnected)
         return true;
 
-    // Dispatch incoming until empty
-    while (dispatch_one())
+    // Dispatch limited number of commands
+    int dispatch_limit = cfg_.max_commands_per_service;
+    while (dispatch_limit-- > 0 && dispatch_one())
         ;
 
-    // Send some outgoing commands
+    // Send generated outgoing commands
     return send_outgoing_commands();
 }
+
+bool EnetPeer::service_fast() { return send_acks_only(); }
 } // namespace enet
 } // namespace luxon
