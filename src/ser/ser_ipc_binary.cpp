@@ -59,7 +59,7 @@ std::expected<Message, Error> IPCBinaryProtocol::Deserialize(std::span<const uin
     ByteReader r(packet_bytes);
 
     auto magic = r.read_u8();
-    if (!magic || *magic != GP_MAGIC)
+    if (!magic || *magic != 0xF5)
         return std::unexpected(Error{.code = Error::Code::BadMagic, .message = "Invalid magic for IPCBinary"});
 
     auto msg_idx = r.read_u8();
