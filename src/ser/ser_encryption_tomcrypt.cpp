@@ -7,9 +7,13 @@
 #include <span>
 #include <string>
 #include <vector>
+#include <cstdint>
 
-#ifdef __3DS__
+#if defined(__3DS__)
 #include <3ds.h>
+#elif defined(__NDS__)
+#include <cstdlib>
+#include <nds.h>
 #endif
 
 extern "C" {
@@ -212,7 +216,7 @@ std::expected<void, Error> CryptoContext::ensure_rng_ready() {
 
     unsigned char seed[64];
 
-#ifdef __3DS__
+#if defined(__3DS__)
     Result rc = psInit();
     if (R_FAILED(rc)) {
         (void)prng_descriptor[impl_->prng_idx].done(&impl_->prng);
@@ -228,6 +232,12 @@ std::expected<void, Error> CryptoContext::ensure_rng_ready() {
         (void)prng_descriptor[impl_->prng_idx].done(&impl_->prng);
         impl_->rng_error = "PS_GenerateRandomBytes failed";
         return std::unexpected(Error{.code = Error::Code::CryptoError, .message = impl_->rng_error});
+    }
+#elif defined(__NDS__)
+    uint8_t *ptr = static_cast<uint8_t *>(seed);
+    for (size_t i = 0; i < sizeof(seed); ++i) {
+        const uint16_t hw_noise = REG_VCOUNT ^ TIMER0_DATA ^ keysHeld();
+        ptr[i] = static_cast<uint8_t>(rand() ^ hw_noise ^ i);
     }
 #else
     const unsigned long got = rng_get_bytes(seed, sizeof(seed), nullptr);
