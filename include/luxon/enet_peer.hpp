@@ -105,7 +105,7 @@ using SocketType = SOCKET;
 using SocketType = int;
 #endif
 
-// Low-level UDP socket wrapper (blocking recv in poll loop)
+// UDP socket wrapper
 class UdpSocket {
 public:
     UdpSocket();
