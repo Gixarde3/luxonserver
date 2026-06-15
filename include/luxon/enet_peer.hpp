@@ -269,13 +269,6 @@ public:
     UdpSocket& socket() { return *sock_; }
     const UdpSocket& socket() const { return *sock_; }
 
-    // Callbacks (optional)
-    void reset_callbacks() {
-        on_state_changed = nullptr;
-        on_payload_command = nullptr;
-        on_log_message = nullptr;
-    }
-
     std::function<void(EnetConnectionState)> on_state_changed;
     std::function<void(EnetCommand&&)> on_payload_command;
     std::function<void(LogLevel, std::string_view)> on_log_message;

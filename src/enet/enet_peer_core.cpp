@@ -156,7 +156,6 @@ void EnetPeer::disconnect(bool noflush) {
 
     // Close is done by owner of socket, transition to Disconnected after send
     set_state(EnetConnectionState::Disconnected);
-    reset_callbacks();
 }
 
 size_t EnetPeer::calculate_initial_offset() const {
@@ -623,7 +622,6 @@ void EnetPeer::execute_command(const EnetCommand& cmd) {
         flush_send_queue(true);
 
         set_state(EnetConnectionState::Disconnected);
-        reset_callbacks();
         break;
     }
 
@@ -741,6 +739,9 @@ void EnetPeer::handle_incoming_packet(const EnetPacketHeader& hdr, std::span<Ene
 }
 
 bool EnetPeer::dispatch_one() {
+    if (state_ != EnetConnectionState::Connected)
+        return false;
+
     // Priority:
     // 1. Incoming_unsequenced queue
     // 2. Unreliable in-order
