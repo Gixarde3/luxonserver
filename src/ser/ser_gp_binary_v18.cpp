@@ -7,6 +7,7 @@
 #include <limits>
 #include <memory>
 #include <utility>
+#include <cmath>
 
 namespace luxon::ser {
 namespace {
@@ -1145,7 +1146,7 @@ std::expected<void, Error> GpBinaryV18::EncodeValue(ByteWriter& w, const Value& 
                 }
                 return {};
             } else if constexpr (std::is_same_v<T, float>) {
-                if (val == 0.0f) {
+                if (val == 0.0f && !std::signbit(val)) {
                     w.write_u8(TC18_FloatZero);
                 } else {
                     w.write_u8(TC18_Float);
@@ -1153,7 +1154,7 @@ std::expected<void, Error> GpBinaryV18::EncodeValue(ByteWriter& w, const Value& 
                 }
                 return {};
             } else if constexpr (std::is_same_v<T, double>) {
-                if (val == 0.0) {
+                if (val == 0.0 && !std::signbit(val)) {
                     w.write_u8(TC18_DoubleZero);
                 } else {
                     w.write_u8(TC18_Double);
