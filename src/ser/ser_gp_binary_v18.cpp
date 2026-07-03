@@ -65,13 +65,13 @@ inline std::unexpected<Error> err(Error::Code code, std::string message) { retur
     do {                                                                                                                                                       \
         auto _exp = (expr);                                                                                                                                    \
         if (!_exp)                                                                                                                                             \
-            return std::unexpected(_exp.error());                                                                                                              \
+            return std::unexpected(std::move(_exp).error());                                                                                                   \
     } while (false)
 
 #define LUXON_TRY_ASSIGN(name, expr)                                                                                                                           \
     auto _exp_##name = (expr);                                                                                                                                 \
     if (!_exp_##name)                                                                                                                                          \
-        return std::unexpected(_exp_##name.error());                                                                                                           \
+        return std::unexpected(std::move(_exp_##name).error());                                                                                                \
     auto name = std::move(*_exp_##name)
 
 inline void write_byte_array(ByteWriter& w, const ByteArray& bytes) { w.write_bytes(std::span<const uint8_t>(bytes.data(), bytes.size())); }
