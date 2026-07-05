@@ -625,107 +625,105 @@ std::expected<ByteArray, Error> GpBinaryV16::Serialize(const Message& message) {
     Kind kind{};
     ByteWriter payload;
 
-    auto enc = std::visit(
-        [&](const auto& m) -> std::expected<void, Error> {
-            using T = std::decay_t<decltype(m)>;
+    auto enc = message.visit([&](const auto& m) -> std::expected<void, Error> {
+        using T = std::decay_t<decltype(m)>;
 
-            if constexpr (std::is_same_v<T, InitMessage>) {
-                kind = Kind::Init;
+        if constexpr (std::is_same_v<T, InitMessage>) {
+            kind = Kind::Init;
 
-                // fixed 39 bytes payload (matches existing V18 layout used by this library)
-                payload.write_u8(m.protocol_major);
-                payload.write_u8(m.protocol_minor);
-                payload.write_u8(static_cast<uint8_t>((m.client_sdk_id << 1) & 0xFE));
+            // fixed 39 bytes payload (matches existing V18 layout used by this library)
+            payload.write_u8(m.protocol_major);
+            payload.write_u8(m.protocol_minor);
+            payload.write_u8(static_cast<uint8_t>((m.client_sdk_id << 1) & 0xFE));
 
-                uint8_t vcombined = 0;
-                if (m.ipv6)
-                    vcombined |= 0x80;
-                vcombined |= static_cast<uint8_t>((m.version_major & 0x07) << 4);
-                vcombined |= static_cast<uint8_t>((m.version_minor & 0x0F));
-                payload.write_u8(vcombined);
+            uint8_t vcombined = 0;
+            if (m.ipv6)
+                vcombined |= 0x80;
+            vcombined |= static_cast<uint8_t>((m.version_major & 0x07) << 4);
+            vcombined |= static_cast<uint8_t>((m.version_minor & 0x0F));
+            payload.write_u8(vcombined);
 
-                payload.write_u8(m.version_patch);
-                payload.write_u8(m.version_revision);
-                payload.write_u8(0x00);
+            payload.write_u8(m.version_patch);
+            payload.write_u8(m.version_revision);
+            payload.write_u8(0x00);
 
-                std::array<uint8_t, 32> app{};
-                std::memset(app.data(), 0, app.size());
-                std::size_t n = std::min<std::size_t>(app.size(), m.app_id.size());
-                std::memcpy(app.data(), m.app_id.data(), n);
-                payload.write_bytes(app);
+            std::array<uint8_t, 32> app{};
+            std::memset(app.data(), 0, app.size());
+            std::size_t n = std::min<std::size_t>(app.size(), m.app_id.size());
+            std::memcpy(app.data(), m.app_id.data(), n);
+            payload.write_bytes(app);
 
-                return {};
-            } else if constexpr (std::is_same_v<T, InitResponseMessage>) {
-                kind = Kind::InitResponse;
-                return {};
-            } else if constexpr (std::is_same_v<T, OperationRequestMessage>) {
-                kind = Kind::Operation;
-                payload.write_u8(m.operation_code);
-                return encode_parameters(payload, m.parameters, 0);
-            } else if constexpr (std::is_same_v<T, OperationResponseMessage>) {
-                kind = Kind::OperationResponse;
-                payload.write_u8(m.operation_code);
-                payload.write_i16_be(m.return_code);
+            return {};
+        } else if constexpr (std::is_same_v<T, InitResponseMessage>) {
+            kind = Kind::InitResponse;
+            return {};
+        } else if constexpr (std::is_same_v<T, OperationRequestMessage>) {
+            kind = Kind::Operation;
+            payload.write_u8(m.operation_code);
+            return encode_parameters(payload, m.parameters, 0);
+        } else if constexpr (std::is_same_v<T, OperationResponseMessage>) {
+            kind = Kind::OperationResponse;
+            payload.write_u8(m.operation_code);
+            payload.write_i16_be(m.return_code);
 
-                if (m.debug_message.has_value()) {
-                    payload.write_u8(TC16_String);
-                    auto ws = write_string_u16(payload, *m.debug_message);
-                    if (!ws)
-                        return std::unexpected(ws.error());
-                } else {
-                    payload.write_u8(TC16_Null);
-                }
-
-                return encode_parameters(payload, m.parameters, 0);
-            } else if constexpr (std::is_same_v<T, EventMessage>) {
-                kind = Kind::Event;
-                payload.write_u8(m.event_code);
-                return encode_parameters(payload, m.parameters, 0);
-            } else if constexpr (std::is_same_v<T, DisconnectMessage>) {
-                kind = Kind::DisconnectMessage;
-                payload.write_i16_be(m.code);
-
-                if (m.message.has_value()) {
-                    payload.write_u8(TC16_String);
-                    auto ws = write_string_u16(payload, *m.message);
-                    if (!ws)
-                        return std::unexpected(ws.error());
-                } else {
-                    payload.write_u8(TC16_Null);
-                }
-
-                return encode_parameters(payload, m.parameters, 0);
-            } else if constexpr (std::is_same_v<T, InternalOperationRequestMessage>) {
-                kind = Kind::InternalOperationRequest;
-                payload.write_u8(m.operation_code);
-                return encode_parameters(payload, m.parameters, 0);
-            } else if constexpr (std::is_same_v<T, InternalOperationResponseMessage>) {
-                kind = Kind::InternalOperationResponse;
-                payload.write_u8(m.operation_code);
-                payload.write_i16_be(m.return_code);
-
-                if (m.debug_message.has_value()) {
-                    payload.write_u8(TC16_String);
-                    auto ws = write_string_u16(payload, *m.debug_message);
-                    if (!ws)
-                        return std::unexpected(ws.error());
-                } else {
-                    payload.write_u8(TC16_Null);
-                }
-
-                return encode_parameters(payload, m.parameters, 0);
-            } else if constexpr (std::is_same_v<T, GenericValueMessage>) {
-                kind = Kind::Message;
-                return EncodeValue(payload, m.value, 0);
-            } else if constexpr (std::is_same_v<T, RawMessage>) {
-                kind = Kind::RawMessage;
-                payload.write_bytes(m.bytes);
-                return {};
+            if (m.debug_message.has_value()) {
+                payload.write_u8(TC16_String);
+                auto ws = write_string_u16(payload, *m.debug_message);
+                if (!ws)
+                    return std::unexpected(ws.error());
             } else {
-                return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "unknown message variant"});
+                payload.write_u8(TC16_Null);
             }
-        },
-        message);
+
+            return encode_parameters(payload, m.parameters, 0);
+        } else if constexpr (std::is_same_v<T, EventMessage>) {
+            kind = Kind::Event;
+            payload.write_u8(m.event_code);
+            return encode_parameters(payload, m.parameters, 0);
+        } else if constexpr (std::is_same_v<T, DisconnectMessage>) {
+            kind = Kind::DisconnectMessage;
+            payload.write_i16_be(m.code);
+
+            if (m.message.has_value()) {
+                payload.write_u8(TC16_String);
+                auto ws = write_string_u16(payload, *m.message);
+                if (!ws)
+                    return std::unexpected(ws.error());
+            } else {
+                payload.write_u8(TC16_Null);
+            }
+
+            return encode_parameters(payload, m.parameters, 0);
+        } else if constexpr (std::is_same_v<T, InternalOperationRequestMessage>) {
+            kind = Kind::InternalOperationRequest;
+            payload.write_u8(m.operation_code);
+            return encode_parameters(payload, m.parameters, 0);
+        } else if constexpr (std::is_same_v<T, InternalOperationResponseMessage>) {
+            kind = Kind::InternalOperationResponse;
+            payload.write_u8(m.operation_code);
+            payload.write_i16_be(m.return_code);
+
+            if (m.debug_message.has_value()) {
+                payload.write_u8(TC16_String);
+                auto ws = write_string_u16(payload, *m.debug_message);
+                if (!ws)
+                    return std::unexpected(ws.error());
+            } else {
+                payload.write_u8(TC16_Null);
+            }
+
+            return encode_parameters(payload, m.parameters, 0);
+        } else if constexpr (std::is_same_v<T, GenericValueMessage>) {
+            kind = Kind::Message;
+            return EncodeValue(payload, m.value, 0);
+        } else if constexpr (std::is_same_v<T, RawMessage>) {
+            kind = Kind::RawMessage;
+            payload.write_bytes(m.bytes);
+            return {};
+        } else {
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "unknown message variant"});
+        }
+    });
 
     if (!enc)
         return std::unexpected(enc.error());

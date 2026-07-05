@@ -78,9 +78,11 @@ add_library(luxon_ser
     include/luxon/ser_interface.hpp src/ser/ser_interface.cpp
     include/luxon/ser_gp_binary_v18.hpp src/ser/ser_gp_binary_v18.cpp
     include/luxon/ser_gp_binary_v16.hpp src/ser/ser_gp_binary_v16.cpp
+    include/luxon/ser_ipc_binary.hpp src/ser/ser_ipc_binary.cpp
     include/luxon/ser_protocol_id.hpp
     include/luxon/internal_codes.hpp
     include/luxon/common_codes.hpp
+    include/luxon/ref_variant.hpp
 )
 if (LUXON_USE_TOMCRYPT)
     target_sources(luxon_ser PRIVATE src/ser/ser_encryption_tomcrypt.cpp)
@@ -110,8 +112,6 @@ add_library(luxon_enet
     src/enet/enet_channel.cpp
     src/enet/enet_peer_core.cpp
     src/enet/enet_server.cpp
-    include/luxon/ser_ipc_binary.hpp
-    src/ser/ser_ipc_binary.cpp
 )
 
 if (MSVC)

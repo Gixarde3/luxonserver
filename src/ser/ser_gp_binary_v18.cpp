@@ -1551,98 +1551,96 @@ std::expected<ByteArray, Error> GpBinaryV18::Serialize(const Message& message) {
     ByteWriter payload;
     Kind kind{};
 
-    LUXON_TRY(std::visit(
-        [&](const auto& m) -> std::expected<void, Error> {
-            using T = std::decay_t<decltype(m)>;
+    LUXON_TRY(static_cast<const MessageVariant&>(message).visit([&](const auto& m) -> std::expected<void, Error> {
+        using T = std::decay_t<decltype(m)>;
 
-            if constexpr (std::is_same_v<T, InitMessage>) {
-                kind = Kind::Init;
-                payload.write_u8(m.protocol_major);
-                payload.write_u8(m.protocol_minor);
+        if constexpr (std::is_same_v<T, InitMessage>) {
+            kind = Kind::Init;
+            payload.write_u8(m.protocol_major);
+            payload.write_u8(m.protocol_minor);
 
-                // Repack sdk_id
-                uint8_t sdk_enc = static_cast<uint8_t>(m.client_sdk_id << 1);
-                payload.write_u8(sdk_enc);
+            // Repack sdk_id
+            uint8_t sdk_enc = static_cast<uint8_t>(m.client_sdk_id << 1);
+            payload.write_u8(sdk_enc);
 
-                // Repack version/ipv6 flags
-                uint8_t vcombined = static_cast<uint8_t>((m.ipv6 ? 0x80 : 0x00) | ((m.version_major & 0x07) << 4) | (m.version_minor & 0x0F));
-                payload.write_u8(vcombined);
+            // Repack version/ipv6 flags
+            uint8_t vcombined = static_cast<uint8_t>((m.ipv6 ? 0x80 : 0x00) | ((m.version_major & 0x07) << 4) | (m.version_minor & 0x0F));
+            payload.write_u8(vcombined);
 
-                payload.write_u8(m.version_patch);
-                payload.write_u8(m.version_revision);
+            payload.write_u8(m.version_patch);
+            payload.write_u8(m.version_revision);
 
-                // 1 byte of padding
-                payload.write_u8(0x00);
+            // 1 byte of padding
+            payload.write_u8(0x00);
 
-                // Fixed 32-byte app_id, padded with nulls
-                ByteArray appid_bytes(32, 0);
-                if (!m.app_id.empty()) {
-                    std::memcpy(appid_bytes.data(), m.app_id.data(), std::min<std::size_t>(32, m.app_id.size()));
-                }
-                payload.write_bytes(appid_bytes);
-                return {};
-            } else if constexpr (std::is_same_v<T, InitResponseMessage>) {
-                kind = Kind::InitResponse;
-                payload.write_u8(0);
-                return {};
-            } else if constexpr (std::is_same_v<T, OperationRequestMessage>) {
-                kind = Kind::Operation;
-                payload.write_u8(m.operation_code);
-                LUXON_TRY(encode_parameters(payload, m.parameters, 0));
-                return {};
-            } else if constexpr (std::is_same_v<T, OperationResponseMessage>) {
-                kind = Kind::OperationResponse;
-                payload.write_u8(m.operation_code);
-                payload.write_i16_le(m.return_code);
-                if (!m.debug_message || m.debug_message->empty()) {
-                    payload.write_u8(TC18_Null);
-                } else {
-                    payload.write_u8(TC18_String);
-                    LUXON_TRY(write_string_payload(payload, *m.debug_message));
-                }
-                LUXON_TRY(encode_parameters(payload, m.parameters, 0));
-                return {};
-            } else if constexpr (std::is_same_v<T, EventMessage>) {
-                kind = Kind::Event;
-                payload.write_u8(m.event_code);
-                LUXON_TRY(encode_parameters(payload, m.parameters, 0));
-                return {};
-            } else if constexpr (std::is_same_v<T, DisconnectMessage>) {
-                kind = Kind::DisconnectMessage;
-                payload.write_i16_le(m.code);
-                LUXON_TRY(encode_typed_string_or_null(payload, m.message));
-                LUXON_TRY(encode_parameters(payload, m.parameters, 0));
-                return {};
-            } else if constexpr (std::is_same_v<T, InternalOperationRequestMessage>) {
-                kind = Kind::InternalOperationRequest;
-                payload.write_u8(m.operation_code);
-                LUXON_TRY(encode_parameters(payload, m.parameters, 0));
-                return {};
-            } else if constexpr (std::is_same_v<T, InternalOperationResponseMessage>) {
-                kind = Kind::InternalOperationResponse;
-                payload.write_u8(m.operation_code);
-                payload.write_i16_le(m.return_code);
-                if (!m.debug_message || m.debug_message->empty()) {
-                    payload.write_u8(TC18_Null);
-                } else {
-                    payload.write_u8(TC18_String);
-                    LUXON_TRY(write_string_payload(payload, *m.debug_message));
-                }
-                LUXON_TRY(encode_parameters(payload, m.parameters, 0));
-                return {};
-            } else if constexpr (std::is_same_v<T, GenericValueMessage>) {
-                kind = Kind::Message;
-                LUXON_TRY(EncodeValue(payload, m.value, 0));
-                return {};
-            } else if constexpr (std::is_same_v<T, RawMessage>) {
-                kind = Kind::RawMessage;
-                write_byte_array(payload, m.bytes);
-                return {};
-            } else {
-                return err(Error::Code::UnsupportedKind, "unsupported Message variant for GpBinaryV18");
+            // Fixed 32-byte app_id, padded with nulls
+            ByteArray appid_bytes(32, 0);
+            if (!m.app_id.empty()) {
+                std::memcpy(appid_bytes.data(), m.app_id.data(), std::min<std::size_t>(32, m.app_id.size()));
             }
-        },
-        static_cast<const MessageVariant&>(message)));
+            payload.write_bytes(appid_bytes);
+            return {};
+        } else if constexpr (std::is_same_v<T, InitResponseMessage>) {
+            kind = Kind::InitResponse;
+            payload.write_u8(0);
+            return {};
+        } else if constexpr (std::is_same_v<T, OperationRequestMessage>) {
+            kind = Kind::Operation;
+            payload.write_u8(m.operation_code);
+            LUXON_TRY(encode_parameters(payload, m.parameters, 0));
+            return {};
+        } else if constexpr (std::is_same_v<T, OperationResponseMessage>) {
+            kind = Kind::OperationResponse;
+            payload.write_u8(m.operation_code);
+            payload.write_i16_le(m.return_code);
+            if (!m.debug_message || m.debug_message->empty()) {
+                payload.write_u8(TC18_Null);
+            } else {
+                payload.write_u8(TC18_String);
+                LUXON_TRY(write_string_payload(payload, *m.debug_message));
+            }
+            LUXON_TRY(encode_parameters(payload, m.parameters, 0));
+            return {};
+        } else if constexpr (std::is_same_v<T, EventMessage>) {
+            kind = Kind::Event;
+            payload.write_u8(m.event_code);
+            LUXON_TRY(encode_parameters(payload, m.parameters, 0));
+            return {};
+        } else if constexpr (std::is_same_v<T, DisconnectMessage>) {
+            kind = Kind::DisconnectMessage;
+            payload.write_i16_le(m.code);
+            LUXON_TRY(encode_typed_string_or_null(payload, m.message));
+            LUXON_TRY(encode_parameters(payload, m.parameters, 0));
+            return {};
+        } else if constexpr (std::is_same_v<T, InternalOperationRequestMessage>) {
+            kind = Kind::InternalOperationRequest;
+            payload.write_u8(m.operation_code);
+            LUXON_TRY(encode_parameters(payload, m.parameters, 0));
+            return {};
+        } else if constexpr (std::is_same_v<T, InternalOperationResponseMessage>) {
+            kind = Kind::InternalOperationResponse;
+            payload.write_u8(m.operation_code);
+            payload.write_i16_le(m.return_code);
+            if (!m.debug_message || m.debug_message->empty()) {
+                payload.write_u8(TC18_Null);
+            } else {
+                payload.write_u8(TC18_String);
+                LUXON_TRY(write_string_payload(payload, *m.debug_message));
+            }
+            LUXON_TRY(encode_parameters(payload, m.parameters, 0));
+            return {};
+        } else if constexpr (std::is_same_v<T, GenericValueMessage>) {
+            kind = Kind::Message;
+            LUXON_TRY(EncodeValue(payload, m.value, 0));
+            return {};
+        } else if constexpr (std::is_same_v<T, RawMessage>) {
+            kind = Kind::RawMessage;
+            write_byte_array(payload, m.bytes);
+            return {};
+        } else {
+            return err(Error::Code::UnsupportedKind, "unsupported Message variant for GpBinaryV18");
+        }
+    }));
 
     LUXON_TRY_ASSIGN(maybe_payload, maybe_encrypt_payload(kind, message.encrypted, payload.bytes()));
 

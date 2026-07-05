@@ -1,6 +1,7 @@
 #pragma once
 
 #include "flat_map.hpp"
+#include "ref_variant.hpp"
 
 #include <array>
 #include <cstddef>
@@ -249,7 +250,7 @@ struct Value {
     bool operator==(const Value& other) const;
 };
 
-// --- Deferred Implementations (Prevents libc++ incomplete type instantiation errors) ---
+// Deferred Implementations
 
 inline Dictionary::Dictionary() = default;
 inline Dictionary::~Dictionary() = default;
@@ -274,8 +275,6 @@ inline bool OperationResponseMessage::operator==(const OperationResponseMessage&
 inline Value& Value::operator=(const Hashtable& other) { return *this = std::make_shared<Hashtable>(other); }
 inline Value& Value::operator=(Hashtable&& other) { return *this = std::make_shared<Hashtable>(std::move(other)); }
 
-// --------------------------------------------------------------------------------------
-
 struct GenericValueMessage {
     Value value{};
 };
@@ -284,8 +283,8 @@ struct RawMessage {
     ByteArray bytes{};
 };
 
-using MessageVariant = std::variant<InitMessage, InitResponseMessage, OperationRequestMessage, OperationResponseMessage, EventMessage, DisconnectMessage,
-                                    InternalOperationRequestMessage, InternalOperationResponseMessage, GenericValueMessage, RawMessage>;
+using MessageVariant = ref_variant<InitMessage, InitResponseMessage, OperationRequestMessage, OperationResponseMessage, EventMessage, DisconnectMessage,
+                                   InternalOperationRequestMessage, InternalOperationResponseMessage, GenericValueMessage, RawMessage>;
 
 struct Error {
     enum class Code : uint8_t {

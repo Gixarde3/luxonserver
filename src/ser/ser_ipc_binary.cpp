@@ -13,42 +13,40 @@ std::expected<ByteArray, Error> IPCBinaryProtocol::Serialize(const Message& mess
     w.write_u8(static_cast<uint8_t>(message.index())); // Message variant index
     w.write_u8(message.encrypted ? 1 : 0);             // Carry encrypted flag
 
-    auto res = std::visit(
-        [&](auto&& arg) -> std::expected<void, Error> {
-            using T = std::decay_t<decltype(arg)>;
-            if constexpr (std::is_same_v<T, InitMessage>) {
-                w.write_u8(arg.protocol_major);
-                w.write_u8(arg.protocol_minor);
-                w.write_u8(arg.client_sdk_id);
-                w.write_u8(arg.ipv6 ? 1 : 0);
-                w.write_u8(arg.version_major);
-                w.write_u8(arg.version_minor);
-                w.write_u8(arg.version_patch);
-                w.write_u8(arg.version_revision);
-                encode_string(w, arg.app_id);
-            } else if constexpr (std::is_same_v<T, InitResponseMessage>) {
-                // Empty payload
-            } else if constexpr (std::is_same_v<T, OperationRequestMessage> || std::is_same_v<T, InternalOperationRequestMessage>) {
-                return encode_op_req(w, arg, 0);
-            } else if constexpr (std::is_same_v<T, OperationResponseMessage> || std::is_same_v<T, InternalOperationResponseMessage>) {
-                return encode_op_resp(w, arg, 0);
-            } else if constexpr (std::is_same_v<T, EventMessage>) {
-                return encode_event(w, arg, 0);
-            } else if constexpr (std::is_same_v<T, DisconnectMessage>) {
-                w.write_i16_le(arg.code);
-                w.write_u8(arg.message.has_value() ? 1 : 0);
-                if (arg.message)
-                    encode_string(w, *arg.message);
-                return encode_dict(w, arg.parameters, 0);
-            } else if constexpr (std::is_same_v<T, GenericValueMessage>) {
-                return EncodeValue(w, arg.value, 0);
-            } else if constexpr (std::is_same_v<T, RawMessage>) {
-                w.write_u32_le(static_cast<uint32_t>(arg.bytes.size()));
-                w.write_bytes(arg.bytes);
-            }
-            return {};
-        },
-        static_cast<const MessageVariant&>(message));
+    auto res = static_cast<const MessageVariant&>(message).visit([&](auto&& arg) -> std::expected<void, Error> {
+        using T = std::decay_t<decltype(arg)>;
+        if constexpr (std::is_same_v<T, InitMessage>) {
+            w.write_u8(arg.protocol_major);
+            w.write_u8(arg.protocol_minor);
+            w.write_u8(arg.client_sdk_id);
+            w.write_u8(arg.ipv6 ? 1 : 0);
+            w.write_u8(arg.version_major);
+            w.write_u8(arg.version_minor);
+            w.write_u8(arg.version_patch);
+            w.write_u8(arg.version_revision);
+            encode_string(w, arg.app_id);
+        } else if constexpr (std::is_same_v<T, InitResponseMessage>) {
+            // Empty payload
+        } else if constexpr (std::is_same_v<T, OperationRequestMessage> || std::is_same_v<T, InternalOperationRequestMessage>) {
+            return encode_op_req(w, arg, 0);
+        } else if constexpr (std::is_same_v<T, OperationResponseMessage> || std::is_same_v<T, InternalOperationResponseMessage>) {
+            return encode_op_resp(w, arg, 0);
+        } else if constexpr (std::is_same_v<T, EventMessage>) {
+            return encode_event(w, arg, 0);
+        } else if constexpr (std::is_same_v<T, DisconnectMessage>) {
+            w.write_i16_le(arg.code);
+            w.write_u8(arg.message.has_value() ? 1 : 0);
+            if (arg.message)
+                encode_string(w, *arg.message);
+            return encode_dict(w, arg.parameters, 0);
+        } else if constexpr (std::is_same_v<T, GenericValueMessage>) {
+            return EncodeValue(w, arg.value, 0);
+        } else if constexpr (std::is_same_v<T, RawMessage>) {
+            w.write_u32_le(static_cast<uint32_t>(arg.bytes.size()));
+            w.write_bytes(arg.bytes);
+        }
+        return {};
+    });
 
     if (!res)
         return std::unexpected(res.error());

@@ -219,73 +219,71 @@ bool print_http_message(std::span<const uint8_t> data, int indent) {
 void print_ser_message(const ser::Message& msg, int indent) {
     std::string prefix(indent * 2, ' ');
 
-    std::visit(
-        [&](const auto& m) {
-            using T = std::decay_t<decltype(m)>;
+    msg.visit([&](const auto& m) {
+        using T = std::decay_t<decltype(m)>;
 
-            if constexpr (std::is_same_v<T, ser::InitMessage>) {
-                std::cout << prefix << ">>> INIT\n";
-                std::cout << prefix << "Protocol: " << (int)m.protocol_major << "." << (int)m.protocol_minor << "\n";
-                std::cout << prefix << "Client SDK ID: " << (int)m.client_sdk_id << "\n";
-                std::cout << prefix << "IPv6: " << (m.ipv6 ? "true" : "false") << "\n";
-                std::cout << prefix << "Version: " << (int)m.version_major << "." << (int)m.version_minor << "." << (int)m.version_patch << " (rev "
-                          << (int)m.version_revision << ")\n";
-                std::cout << prefix << "App ID: " << m.app_id << "\n";
+        if constexpr (std::is_same_v<T, ser::InitMessage>) {
+            std::cout << prefix << ">>> INIT\n";
+            std::cout << prefix << "Protocol: " << (int)m.protocol_major << "." << (int)m.protocol_minor << "\n";
+            std::cout << prefix << "Client SDK ID: " << (int)m.client_sdk_id << "\n";
+            std::cout << prefix << "IPv6: " << (m.ipv6 ? "true" : "false") << "\n";
+            std::cout << prefix << "Version: " << (int)m.version_major << "." << (int)m.version_minor << "." << (int)m.version_patch << " (rev "
+                      << (int)m.version_revision << ")\n";
+            std::cout << prefix << "App ID: " << m.app_id << "\n";
 
-            } else if constexpr (std::is_same_v<T, ser::InitResponseMessage>) {
-                std::cout << prefix << "<<< INIT RESPONSE\n";
+        } else if constexpr (std::is_same_v<T, ser::InitResponseMessage>) {
+            std::cout << prefix << "<<< INIT RESPONSE\n";
 
-            } else if constexpr (std::is_same_v<T, ser::OperationRequestMessage>) {
-                std::cout << prefix << ">>> OPERATION REQUEST\n";
-                std::cout << prefix << "OpCode: " << (int)m.operation_code << "\n";
-                print_parameters(m.parameters, indent);
+        } else if constexpr (std::is_same_v<T, ser::OperationRequestMessage>) {
+            std::cout << prefix << ">>> OPERATION REQUEST\n";
+            std::cout << prefix << "OpCode: " << (int)m.operation_code << "\n";
+            print_parameters(m.parameters, indent);
 
-            } else if constexpr (std::is_same_v<T, ser::OperationResponseMessage>) {
-                std::cout << prefix << "<<< OPERATION RESPONSE\n";
-                std::cout << prefix << "OpCode: " << (int)m.operation_code << "\n";
-                std::cout << prefix << "ReturnCode: " << m.return_code << "\n";
-                if (m.debug_message)
-                    std::cout << prefix << "DebugMsg: " << *m.debug_message << "\n";
-                print_parameters(m.parameters, indent);
+        } else if constexpr (std::is_same_v<T, ser::OperationResponseMessage>) {
+            std::cout << prefix << "<<< OPERATION RESPONSE\n";
+            std::cout << prefix << "OpCode: " << (int)m.operation_code << "\n";
+            std::cout << prefix << "ReturnCode: " << m.return_code << "\n";
+            if (m.debug_message)
+                std::cout << prefix << "DebugMsg: " << *m.debug_message << "\n";
+            print_parameters(m.parameters, indent);
 
-            } else if constexpr (std::is_same_v<T, ser::EventMessage>) {
-                std::cout << prefix << "<<< EVENT\n";
-                std::cout << prefix << "EventCode: " << (int)m.event_code << "\n";
-                print_parameters(m.parameters, indent);
+        } else if constexpr (std::is_same_v<T, ser::EventMessage>) {
+            std::cout << prefix << "<<< EVENT\n";
+            std::cout << prefix << "EventCode: " << (int)m.event_code << "\n";
+            print_parameters(m.parameters, indent);
 
-            } else if constexpr (std::is_same_v<T, ser::DisconnectMessage>) {
-                std::cout << prefix << "<<< DISCONNECT\n";
-                std::cout << prefix << "Code: " << m.code << "\n";
-                if (m.message)
-                    std::cout << prefix << "Message: " << *m.message << "\n";
-                print_parameters(m.parameters, indent);
+        } else if constexpr (std::is_same_v<T, ser::DisconnectMessage>) {
+            std::cout << prefix << "<<< DISCONNECT\n";
+            std::cout << prefix << "Code: " << m.code << "\n";
+            if (m.message)
+                std::cout << prefix << "Message: " << *m.message << "\n";
+            print_parameters(m.parameters, indent);
 
-            } else if constexpr (std::is_same_v<T, ser::InternalOperationRequestMessage>) {
-                std::cout << prefix << ">>> INTERNAL OP REQUEST\n";
-                std::cout << prefix << "OpCode: " << (int)m.operation_code << "\n";
-                print_parameters(m.parameters, indent);
+        } else if constexpr (std::is_same_v<T, ser::InternalOperationRequestMessage>) {
+            std::cout << prefix << ">>> INTERNAL OP REQUEST\n";
+            std::cout << prefix << "OpCode: " << (int)m.operation_code << "\n";
+            print_parameters(m.parameters, indent);
 
-            } else if constexpr (std::is_same_v<T, ser::InternalOperationResponseMessage>) {
-                std::cout << prefix << "<<< INTERNAL OP RESPONSE\n";
-                std::cout << prefix << "OpCode: " << (int)m.operation_code << "\n";
-                std::cout << prefix << "ReturnCode: " << m.return_code << "\n";
-                if (m.debug_message)
-                    std::cout << prefix << "DebugMsg: " << *m.debug_message << "\n";
-                print_parameters(m.parameters, indent);
+        } else if constexpr (std::is_same_v<T, ser::InternalOperationResponseMessage>) {
+            std::cout << prefix << "<<< INTERNAL OP RESPONSE\n";
+            std::cout << prefix << "OpCode: " << (int)m.operation_code << "\n";
+            std::cout << prefix << "ReturnCode: " << m.return_code << "\n";
+            if (m.debug_message)
+                std::cout << prefix << "DebugMsg: " << *m.debug_message << "\n";
+            print_parameters(m.parameters, indent);
 
-            } else if constexpr (std::is_same_v<T, ser::GenericValueMessage>) {
-                std::cout << prefix << "<<< GENERIC VALUE MESSAGE\n";
-                print_value(m.value, indent + 1);
+        } else if constexpr (std::is_same_v<T, ser::GenericValueMessage>) {
+            std::cout << prefix << "<<< GENERIC VALUE MESSAGE\n";
+            print_value(m.value, indent + 1);
 
-            } else if constexpr (std::is_same_v<T, ser::RawMessage>) {
-                std::cout << prefix << "<<< RAW MESSAGE (" << m.bytes.size() << " bytes)\n";
-                helpers::print_hex_dump(m.bytes, indent + 1);
+        } else if constexpr (std::is_same_v<T, ser::RawMessage>) {
+            std::cout << prefix << "<<< RAW MESSAGE (" << m.bytes.size() << " bytes)\n";
+            helpers::print_hex_dump(m.bytes, indent + 1);
 
-            } else {
-                std::cout << prefix << "[unhandled message type]\n";
-            }
-        },
-        msg);
+        } else {
+            std::cout << prefix << "[unhandled message type]\n";
+        }
+    });
     std::cout << std::endl;
 }
 
