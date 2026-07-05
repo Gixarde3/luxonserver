@@ -40,9 +40,6 @@ template <class... Ts> class ref_variant {
     static constexpr std::size_t storage_size_ = std::max({std::size_t(sizeof(Ts))...});
     static constexpr std::size_t storage_align_ = std::max({std::size_t(alignof(Ts))...});
 
-    static constexpr uint64_t ptr_payload_mask_ = 0x00FF'FFFF'FFFF'FFFFull;
-    static constexpr unsigned tag_shift_ = 56;
-
     struct no_init_t {
         explicit no_init_t() = default;
     };
@@ -131,6 +128,8 @@ template <class... Ts> class ref_variant {
     explicit ref_variant(no_init_t) noexcept {}
 
 public:
+    using tagged_handle = uint64_t;
+
     ref_variant()
         requires std::default_initializable<first_t>
     {
@@ -334,20 +333,19 @@ public:
     }
 
     [[nodiscard]]
-    uint64_t encode_tagged_ptr() const noexcept {
-        uint64_t u = reinterpret_cast<std::uintptr_t>(ptr_);
-        u |= (static_cast<uint64_t>(index_) << tag_shift_);
+    tagged_handle encode_tagged_handle() const noexcept {
+        tagged_handle u = reinterpret_cast<std::uintptr_t>(ptr_);
+        u |= (static_cast<tagged_handle>(index_) << 56);
         return u;
     }
 
     [[nodiscard]]
-    static ref_variant decode_tagged_ptr(uint64_t tagged) noexcept {
-        static_assert(sizeof(void *) == 8, "decode_tagged_ptr requires 64-bit pointers");
+    static ref_variant decode_tagged_handle(tagged_handle tagged) noexcept {
         static_assert(sizeof...(Ts) <= 256, "decode_tagged_ptr needs at most 256 alternatives");
 
-        const std::size_t idx = static_cast<std::uint8_t>(tagged >> tag_shift_);
+        const std::size_t idx = static_cast<std::uint8_t>(tagged >> 56);
 
-        void *p = reinterpret_cast<void *>(static_cast<std::uintptr_t>(tagged & ptr_payload_mask_));
+        void *p = reinterpret_cast<void *>(static_cast<std::uintptr_t>(tagged & 0x00FF'FFFF'FFFF'FFFFull));
 
         assert(idx < sizeof...(Ts));
         assert(p != nullptr);
