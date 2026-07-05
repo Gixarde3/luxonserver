@@ -12,8 +12,8 @@
 #include <utility>
 #include <variant>
 
+namespace luxon::ser {
 namespace rv_detail {
-
 template <class...> struct unique_types : std::true_type {};
 
 template <class T, class... Rest> struct unique_types<T, Rest...> : std::bool_constant<(!(std::same_as<T, Rest>) && ...) && unique_types<Rest...>::value> {};
@@ -23,7 +23,6 @@ template <class T, class... Ts> struct index_of;
 template <class T, class... Rest> struct index_of<T, T, Rest...> : std::integral_constant<std::size_t, 0> {};
 
 template <class T, class U, class... Rest> struct index_of<T, U, Rest...> : std::integral_constant<std::size_t, 1 + index_of<T, Rest...>::value> {};
-
 } // namespace rv_detail
 
 template <class... Ts> class ref_variant {
@@ -356,3 +355,4 @@ public:
         return from_raw_index(idx, p);
     }
 };
+} // namespace luxon::ser
