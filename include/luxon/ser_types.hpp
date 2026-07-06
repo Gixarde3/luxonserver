@@ -180,6 +180,7 @@ struct Value {
     Value& operator=(Value&& other) noexcept = default;
 
     template <typename T, typename = std::enable_if_t<!std::is_same_v<std::decay_t<T>, Value>>> Value(T&& v) : value(std::forward<T>(v)) {}
+    Value(Hashtable *v) : Value(std::shared_ptr<ser::Hashtable>(std::shared_ptr<ser::Hashtable>(), v)) {}
 
     bool is_null() const { return value.holds_alternative<std::monostate>(); }
 
