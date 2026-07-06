@@ -6,6 +6,7 @@
 #include "ser_types.hpp"
 
 #include <string>
+#include <span>
 
 namespace luxon {
 struct HttpRequest;
