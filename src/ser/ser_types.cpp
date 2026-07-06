@@ -3,6 +3,7 @@
 
 #include "ser_types.hpp"
 
+#include <span>
 #include <bit>
 
 namespace luxon::ser {
