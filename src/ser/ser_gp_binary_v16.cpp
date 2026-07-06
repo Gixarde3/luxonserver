@@ -123,7 +123,7 @@ std::expected<void, Error> GpBinaryV16::EncodeValue(ByteWriter& w, const Value& 
     if (depth > MAX_DEPTH)
         return std::unexpected(Error{.code = Error::Code::DepthLimit, .message = "value depth limit"});
 
-    return std::visit(
+    return v.value.visit(
         [&](const auto& a) -> std::expected<void, Error> {
             using T = std::decay_t<decltype(a)>;
 
@@ -300,8 +300,7 @@ std::expected<void, Error> GpBinaryV16::EncodeValue(ByteWriter& w, const Value& 
             } else {
                 return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "unsupported variant member for GpBinaryV16"});
             }
-        },
-        v.value);
+        });
 }
 
 std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) const {

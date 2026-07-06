@@ -205,154 +205,152 @@ std::expected<void, Error> IPCBinaryProtocol::EncodeValue(ByteWriter& w, const V
 
     w.write_u8(static_cast<uint8_t>(v.value.index()));
 
-    return std::visit(
-        [&](auto&& arg) -> std::expected<void, Error> {
-            using T = std::decay_t<decltype(arg)>;
-            if constexpr (std::is_same_v<T, std::monostate>)
-                return {};
-            else if constexpr (std::is_same_v<T, bool>) {
-                w.write_u8(arg ? 1 : 0);
-                return {};
-            } else if constexpr (std::is_same_v<T, uint8_t>) {
-                w.write_u8(arg);
-                return {};
-            } else if constexpr (std::is_same_v<T, int16_t>) {
-                w.write_i16_le(arg);
-                return {};
-            } else if constexpr (std::is_same_v<T, int32_t>) {
-                w.write_i32_le(arg);
-                return {};
-            } else if constexpr (std::is_same_v<T, int64_t>) {
-                w.write_i64_le(arg);
-                return {};
-            } else if constexpr (std::is_same_v<T, float>) {
-                w.write_f32_le(arg);
-                return {};
-            } else if constexpr (std::is_same_v<T, double>) {
-                w.write_f64_le(arg);
-                return {};
-            } else if constexpr (std::is_same_v<T, std::string>) {
-                encode_string(w, arg);
-                return {};
-            } else if constexpr (std::is_same_v<T, ByteArray>) {
-                encode_bytearray(w, arg);
-                return {};
-            } else if constexpr (std::is_same_v<T, std::vector<bool>>) {
-                w.write_u32_le(static_cast<uint32_t>(arg.size()));
-                for (bool b : arg)
-                    w.write_u8(b ? 1 : 0);
-                return {};
-            } else if constexpr (std::is_same_v<T, std::vector<int16_t>>)
-                return encode_pod_vector(w, arg);
-            else if constexpr (std::is_same_v<T, std::vector<int32_t>>)
-                return encode_pod_vector(w, arg);
-            else if constexpr (std::is_same_v<T, std::vector<int64_t>>)
-                return encode_pod_vector(w, arg);
-            else if constexpr (std::is_same_v<T, std::vector<float>>)
-                return encode_pod_vector(w, arg);
-            else if constexpr (std::is_same_v<T, std::vector<double>>)
-                return encode_pod_vector(w, arg);
-            else if constexpr (std::is_same_v<T, std::vector<std::string>>) {
-                w.write_u32_le(static_cast<uint32_t>(arg.size()));
-                for (const auto& s : arg)
-                    encode_string(w, s);
-                return {};
-            } else if constexpr (std::is_same_v<T, ObjectArray>) {
-                w.write_u32_le(static_cast<uint32_t>(arg.size()));
-                for (const auto& val : arg)
-                    if (auto err = EncodeValue(w, val, depth + 1); !err)
-                        return err;
-                return {};
-            } else if constexpr (std::is_same_v<T, JaggedArray>) {
-                w.write_u32_le(static_cast<uint32_t>(arg.elements.size()));
-                for (const auto& val : arg.elements)
-                    if (auto err = EncodeValue(w, val, depth + 1); !err)
-                        return err;
-                return {};
-            } else if constexpr (std::is_same_v<T, Dictionary>)
-                return encode_dict(w, arg, depth);
-            else if constexpr (std::is_same_v<T, GenericDictionary>) {
-                encode_bytearray(w, arg.header);
-                w.write_u32_le(static_cast<uint32_t>(arg.entries.size()));
-                for (const auto& [k, val] : arg.entries) {
-                    if (auto err = EncodeValue(w, k, depth + 1); !err)
-                        return err;
-                    if (auto err = EncodeValue(w, val, depth + 1); !err)
-                        return err;
-                }
-                return {};
-            } else if constexpr (std::is_same_v<T, HashtablePtr>) {
-                if (!arg) {
-                    w.write_u32_le(0xFFFFFFFF);
-                    return {};
-                }
-                w.write_u32_le(static_cast<uint32_t>(arg->size()));
-                for (const auto& [k, val] : *arg) {
-                    if (auto err = EncodeValue(w, k, depth + 1); !err)
-                        return err;
-                    if (auto err = EncodeValue(w, val, depth + 1); !err)
-                        return err;
-                }
-                return {};
-            } else if constexpr (std::is_same_v<T, RawCustomValue>) {
-                w.write_u8(arg.custom_code);
-                encode_bytearray(w, arg.data);
-                return {};
-            } else if constexpr (std::is_same_v<T, EventMessage>)
-                return encode_event(w, arg, depth);
-            else if constexpr (std::is_same_v<T, OperationRequestMessage>)
-                return encode_op_req(w, arg, depth);
-            else if constexpr (std::is_same_v<T, OperationResponseMessage>)
-                return encode_op_resp(w, arg, depth);
-            else if constexpr (std::is_same_v<T, std::vector<Dictionary>>) {
-                w.write_u32_le(static_cast<uint32_t>(arg.size()));
-                for (const auto& item : arg)
-                    if (auto err = encode_dict(w, item, depth + 1); !err)
-                        return err;
-                return {};
-            } else if constexpr (std::is_same_v<T, std::vector<GenericDictionary>>) {
-                w.write_u32_le(static_cast<uint32_t>(arg.size()));
-                for (const auto& item : arg) {
-                    encode_bytearray(w, item.header);
-                    w.write_u32_le(static_cast<uint32_t>(item.entries.size()));
-                    for (const auto& [k, val] : item.entries) {
-                        if (auto err = EncodeValue(w, k, depth + 1); !err)
-                            return err;
-                        if (auto err = EncodeValue(w, val, depth + 1); !err)
-                            return err;
-                    }
-                }
-                return {};
-            } else if constexpr (std::is_same_v<T, std::vector<HashtablePtr>>) {
-                w.write_u32_le(static_cast<uint32_t>(arg.size()));
-                for (const auto& ht : arg) {
-                    if (!ht) {
-                        w.write_u32_le(0xFFFFFFFF);
-                        continue;
-                    } // Sentinel
-                    w.write_u32_le(static_cast<uint32_t>(ht->size()));
-                    for (const auto& [k, val] : *ht) {
-                        if (auto err = EncodeValue(w, k, depth + 1); !err)
-                            return err;
-                        if (auto err = EncodeValue(w, val, depth + 1); !err)
-                            return err;
-                    }
-                }
-                return {};
-            } else if constexpr (std::is_same_v<T, std::vector<RawCustomValue>>) {
-                w.write_u32_le(static_cast<uint32_t>(arg.size()));
-                for (const auto& cv : arg) {
-                    w.write_u8(cv.custom_code);
-                    encode_bytearray(w, cv.data);
-                }
-                return {};
-            } else if constexpr (std::is_same_v<T, PreSerializedValue>) {
-                encode_bytearray(w, arg.data);
+    return v.value.visit([&](auto&& arg) -> std::expected<void, Error> {
+        using T = std::decay_t<decltype(arg)>;
+        if constexpr (std::is_same_v<T, std::monostate>)
+            return {};
+        else if constexpr (std::is_same_v<T, bool>) {
+            w.write_u8(arg ? 1 : 0);
+            return {};
+        } else if constexpr (std::is_same_v<T, uint8_t>) {
+            w.write_u8(arg);
+            return {};
+        } else if constexpr (std::is_same_v<T, int16_t>) {
+            w.write_i16_le(arg);
+            return {};
+        } else if constexpr (std::is_same_v<T, int32_t>) {
+            w.write_i32_le(arg);
+            return {};
+        } else if constexpr (std::is_same_v<T, int64_t>) {
+            w.write_i64_le(arg);
+            return {};
+        } else if constexpr (std::is_same_v<T, float>) {
+            w.write_f32_le(arg);
+            return {};
+        } else if constexpr (std::is_same_v<T, double>) {
+            w.write_f64_le(arg);
+            return {};
+        } else if constexpr (std::is_same_v<T, std::string>) {
+            encode_string(w, arg);
+            return {};
+        } else if constexpr (std::is_same_v<T, ByteArray>) {
+            encode_bytearray(w, arg);
+            return {};
+        } else if constexpr (std::is_same_v<T, std::vector<bool>>) {
+            w.write_u32_le(static_cast<uint32_t>(arg.size()));
+            for (bool b : arg)
+                w.write_u8(b ? 1 : 0);
+            return {};
+        } else if constexpr (std::is_same_v<T, std::vector<int16_t>>)
+            return encode_pod_vector(w, arg);
+        else if constexpr (std::is_same_v<T, std::vector<int32_t>>)
+            return encode_pod_vector(w, arg);
+        else if constexpr (std::is_same_v<T, std::vector<int64_t>>)
+            return encode_pod_vector(w, arg);
+        else if constexpr (std::is_same_v<T, std::vector<float>>)
+            return encode_pod_vector(w, arg);
+        else if constexpr (std::is_same_v<T, std::vector<double>>)
+            return encode_pod_vector(w, arg);
+        else if constexpr (std::is_same_v<T, std::vector<std::string>>) {
+            w.write_u32_le(static_cast<uint32_t>(arg.size()));
+            for (const auto& s : arg)
+                encode_string(w, s);
+            return {};
+        } else if constexpr (std::is_same_v<T, ObjectArray>) {
+            w.write_u32_le(static_cast<uint32_t>(arg.size()));
+            for (const auto& val : arg)
+                if (auto err = EncodeValue(w, val, depth + 1); !err)
+                    return err;
+            return {};
+        } else if constexpr (std::is_same_v<T, JaggedArray>) {
+            w.write_u32_le(static_cast<uint32_t>(arg.elements.size()));
+            for (const auto& val : arg.elements)
+                if (auto err = EncodeValue(w, val, depth + 1); !err)
+                    return err;
+            return {};
+        } else if constexpr (std::is_same_v<T, Dictionary>)
+            return encode_dict(w, arg, depth);
+        else if constexpr (std::is_same_v<T, GenericDictionary>) {
+            encode_bytearray(w, arg.header);
+            w.write_u32_le(static_cast<uint32_t>(arg.entries.size()));
+            for (const auto& [k, val] : arg.entries) {
+                if (auto err = EncodeValue(w, k, depth + 1); !err)
+                    return err;
+                if (auto err = EncodeValue(w, val, depth + 1); !err)
+                    return err;
+            }
+            return {};
+        } else if constexpr (std::is_same_v<T, HashtablePtr>) {
+            if (!arg) {
+                w.write_u32_le(0xFFFFFFFF);
                 return {};
             }
-            return std::unexpected(Error{.code = Error::Code::UnsupportedTypeCode, .message = "Unknown value type"});
-        },
-        v.value);
+            w.write_u32_le(static_cast<uint32_t>(arg->size()));
+            for (const auto& [k, val] : *arg) {
+                if (auto err = EncodeValue(w, k, depth + 1); !err)
+                    return err;
+                if (auto err = EncodeValue(w, val, depth + 1); !err)
+                    return err;
+            }
+            return {};
+        } else if constexpr (std::is_same_v<T, RawCustomValue>) {
+            w.write_u8(arg.custom_code);
+            encode_bytearray(w, arg.data);
+            return {};
+        } else if constexpr (std::is_same_v<T, EventMessage>)
+            return encode_event(w, arg, depth);
+        else if constexpr (std::is_same_v<T, OperationRequestMessage>)
+            return encode_op_req(w, arg, depth);
+        else if constexpr (std::is_same_v<T, OperationResponseMessage>)
+            return encode_op_resp(w, arg, depth);
+        else if constexpr (std::is_same_v<T, std::vector<Dictionary>>) {
+            w.write_u32_le(static_cast<uint32_t>(arg.size()));
+            for (const auto& item : arg)
+                if (auto err = encode_dict(w, item, depth + 1); !err)
+                    return err;
+            return {};
+        } else if constexpr (std::is_same_v<T, std::vector<GenericDictionary>>) {
+            w.write_u32_le(static_cast<uint32_t>(arg.size()));
+            for (const auto& item : arg) {
+                encode_bytearray(w, item.header);
+                w.write_u32_le(static_cast<uint32_t>(item.entries.size()));
+                for (const auto& [k, val] : item.entries) {
+                    if (auto err = EncodeValue(w, k, depth + 1); !err)
+                        return err;
+                    if (auto err = EncodeValue(w, val, depth + 1); !err)
+                        return err;
+                }
+            }
+            return {};
+        } else if constexpr (std::is_same_v<T, std::vector<HashtablePtr>>) {
+            w.write_u32_le(static_cast<uint32_t>(arg.size()));
+            for (const auto& ht : arg) {
+                if (!ht) {
+                    w.write_u32_le(0xFFFFFFFF);
+                    continue;
+                } // Sentinel
+                w.write_u32_le(static_cast<uint32_t>(ht->size()));
+                for (const auto& [k, val] : *ht) {
+                    if (auto err = EncodeValue(w, k, depth + 1); !err)
+                        return err;
+                    if (auto err = EncodeValue(w, val, depth + 1); !err)
+                        return err;
+                }
+            }
+            return {};
+        } else if constexpr (std::is_same_v<T, std::vector<RawCustomValue>>) {
+            w.write_u32_le(static_cast<uint32_t>(arg.size()));
+            for (const auto& cv : arg) {
+                w.write_u8(cv.custom_code);
+                encode_bytearray(w, cv.data);
+            }
+            return {};
+        } else if constexpr (std::is_same_v<T, PreSerializedValue>) {
+            encode_bytearray(w, arg.data);
+            return {};
+        }
+        return std::unexpected(Error{.code = Error::Code::UnsupportedTypeCode, .message = "Unknown value type"});
+    });
 }
 
 std::expected<Value, Error> IPCBinaryProtocol::DecodeValue(ByteReader& r, int depth) const {

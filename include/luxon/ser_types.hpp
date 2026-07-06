@@ -3,18 +3,14 @@
 #include "flat_map.hpp"
 #include "ref_variant.hpp"
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
-#include <expected>
 #include <memory>
 #include <optional>
-#include <span>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
-#include <variant>
 #include <vector>
 
 namespace luxon::ser {
@@ -137,38 +133,38 @@ struct InternalOperationResponseMessage {
 };
 
 struct Value {
-    using VariantType = std::variant<std::monostate,                 // null
-                                     bool,                           // boolean
-                                     uint8_t,                        // byte
-                                     int16_t,                        // short
-                                     int32_t,                        // int
-                                     int64_t,                        // long
-                                     float,                          // float
-                                     double,                         // double
-                                     std::string,                    // string
-                                     ByteArray,                      // byte array
-                                     std::vector<bool>,              // boolean array
-                                     std::vector<int16_t>,           // short array
-                                     std::vector<int32_t>,           // int array
-                                     std::vector<int64_t>,           // long array
-                                     std::vector<float>,             // float array
-                                     std::vector<double>,            // double array
-                                     std::vector<std::string>,       // string array
-                                     ObjectArray,                    // object array (0x17)
-                                     JaggedArray,                    // array/jagged array (0x40)
-                                     Dictionary,                     // convenience dictionary<byte,object>
-                                     GenericDictionary,              // exact generic dictionary
-                                     HashtablePtr,                   // hashtable
-                                     RawCustomValue,                 // custom type
-                                     EventMessage,                   // event data
-                                     OperationRequestMessage,        // operation request
-                                     OperationResponseMessage,       // operation response
-                                     std::vector<Dictionary>,        // convenience dictionary array
-                                     std::vector<GenericDictionary>, // exact generic dictionary array
-                                     std::vector<HashtablePtr>,      // hashtable array
-                                     std::vector<RawCustomValue>,    // custom type array
-                                     PreSerializedValue              // value that is already serialized
-                                     >;
+    using VariantType = ref_variant<std::monostate,                 // null
+                                    bool,                           // boolean
+                                    uint8_t,                        // byte
+                                    int16_t,                        // short
+                                    int32_t,                        // int
+                                    int64_t,                        // long
+                                    float,                          // float
+                                    double,                         // double
+                                    std::string,                    // string
+                                    ByteArray,                      // byte array
+                                    std::vector<bool>,              // boolean array
+                                    std::vector<int16_t>,           // short array
+                                    std::vector<int32_t>,           // int array
+                                    std::vector<int64_t>,           // long array
+                                    std::vector<float>,             // float array
+                                    std::vector<double>,            // double array
+                                    std::vector<std::string>,       // string array
+                                    ObjectArray,                    // object array (0x17)
+                                    JaggedArray,                    // array/jagged array (0x40)
+                                    Dictionary,                     // convenience dictionary<byte,object>
+                                    GenericDictionary,              // exact generic dictionary
+                                    HashtablePtr,                   // hashtable
+                                    RawCustomValue,                 // custom type
+                                    EventMessage,                   // event data
+                                    OperationRequestMessage,        // operation request
+                                    OperationResponseMessage,       // operation response
+                                    std::vector<Dictionary>,        // convenience dictionary array
+                                    std::vector<GenericDictionary>, // exact generic dictionary array
+                                    std::vector<HashtablePtr>,      // hashtable array
+                                    std::vector<RawCustomValue>,    // custom type array
+                                    PreSerializedValue              // value that is already serialized
+                                    >;
 
     VariantType value;
 
@@ -185,27 +181,27 @@ struct Value {
 
     template <typename T, typename = std::enable_if_t<!std::is_same_v<std::decay_t<T>, Value>>> Value(T&& v) : value(std::forward<T>(v)) {}
 
-    bool is_null() const { return std::holds_alternative<std::monostate>(value); }
+    bool is_null() const { return value.holds_alternative<std::monostate>(); }
 
-    template <typename T> bool is() const { return std::holds_alternative<T>(value); }
+    template <typename T> bool is() const { return value.holds_alternative<T>(); }
 
-    template <typename T> const T& get() const { return std::get<T>(value); }
+    template <typename T> const T& get() const { return value.get<T>(); }
 
-    template <typename T> T& get() { return std::get<T>(value); }
+    template <typename T> T& get() { return value.get<T>(); }
 
-    template <typename T> T *get_ptr() { return std::get_if<T>(&value); }
+    template <typename T> T *get_ptr() { return value.get_if<T>(); }
 
-    template <typename T> const T *get_ptr() const { return std::get_if<T>(&value); }
+    template <typename T> const T *get_ptr() const { return value.get_if<T>(); }
 
     template <typename T> bool is_equal(const T& target) const {
-        if (const T *ptr = std::get_if<T>(&value)) {
+        if (const T *ptr = value.get_if<T>()) {
             return target == *ptr;
         }
         return false;
     }
 
     template <typename T> bool store_if(T& target) const {
-        if (const T *ptr = std::get_if<T>(&value)) {
+        if (const T *ptr = value.get_if<T>()) {
             target = *ptr;
             return true;
         }
@@ -213,35 +209,35 @@ struct Value {
     }
 
     template <typename T> T get_or() const {
-        if (const T *ptr = std::get_if<T>(&value)) {
+        if (const T *ptr = value.get_if<T>()) {
             return *ptr;
         }
         return T{};
     }
 
     template <typename T> const T& get_or(T& default_value) const {
-        if (const T *ptr = std::get_if<T>(&value)) {
+        if (const T *ptr = value.get_if<T>()) {
             return *ptr;
         }
         return default_value;
     }
 
     template <typename T> const T& get_or(const T& default_value) const {
-        if (const T *ptr = std::get_if<T>(&value)) {
+        if (const T *ptr = value.get_if<T>()) {
             return *ptr;
         }
         return default_value;
     }
 
     template <typename T> T get_or(T&& default_value) const {
-        if (const T *ptr = std::get_if<T>(&value)) {
+        if (const T *ptr = value.get_if<T>()) {
             return *ptr;
         }
         return std::forward<T>(default_value);
     }
 
     template <typename T> std::optional<T> get_optional() const {
-        if (const T *ptr = std::get_if<T>(&value)) {
+        if (const T *ptr = value.get_if<T>()) {
             return *ptr;
         }
         return std::nullopt;

@@ -1082,208 +1082,206 @@ std::expected<void, Error> GpBinaryV18::EncodeValue(ByteWriter& w, const Value& 
         return {};
     }
 
-    return std::visit(
-        [&]<typename T>(const T& val) -> std::expected<void, Error> {
-            if constexpr (std::is_same_v<T, bool>) {
-                w.write_u8(val ? TC18_BooleanTrue : TC18_BooleanFalse);
-                return {};
-            } else if constexpr (std::is_same_v<T, uint8_t>) {
-                if (val == 0) {
-                    w.write_u8(TC18_ByteZero);
-                } else {
-                    w.write_u8(TC18_Byte);
-                    w.write_u8(val);
-                }
-                return {};
-            } else if constexpr (std::is_same_v<T, int16_t>) {
-                if (val == 0) {
-                    w.write_u8(TC18_ShortZero);
-                } else {
-                    w.write_u8(TC18_Short);
-                    w.write_i16_le(val);
-                }
-                return {};
-            } else if constexpr (std::is_same_v<T, int32_t>) {
-                const int32_t x = val;
-                if (x == 0) {
-                    w.write_u8(TC18_IntZero);
-                } else if (x > 0 && x <= 255) {
-                    w.write_u8(TC18_Int1);
-                    w.write_u8(static_cast<uint8_t>(x));
-                } else if (x > 255 && x <= 65535) {
-                    w.write_u8(TC18_Int2);
-                    w.write_u16_le(static_cast<uint16_t>(x));
-                } else if (x < 0 && x >= -255) {
-                    w.write_u8(TC18_Int1_);
-                    w.write_u8(static_cast<uint8_t>(-x));
-                } else if (x < -255 && x >= -65535) {
-                    w.write_u8(TC18_Int2_);
-                    w.write_u16_le(static_cast<uint16_t>(-x));
-                } else {
-                    w.write_u8(TC18_CompressedInt);
-                    write_int32_payload(w, x);
-                }
-                return {};
-            } else if constexpr (std::is_same_v<T, int64_t>) {
-                const int64_t x = val;
-                if (x == 0) {
-                    w.write_u8(TC18_LongZero);
-                } else if (x > 0 && x <= 255) {
-                    w.write_u8(TC18_L1);
-                    w.write_u8(static_cast<uint8_t>(x));
-                } else if (x > 255 && x <= 65535) {
-                    w.write_u8(TC18_L2);
-                    w.write_u16_le(static_cast<uint16_t>(x));
-                } else if (x < 0 && x >= -255) {
-                    w.write_u8(TC18_L1_);
-                    w.write_u8(static_cast<uint8_t>(-x));
-                } else if (x < -255 && x >= -65535) {
-                    w.write_u8(TC18_L2_);
-                    w.write_u16_le(static_cast<uint16_t>(-x));
-                } else {
-                    w.write_u8(TC18_CompressedLong);
-                    write_int64_payload(w, x);
-                }
-                return {};
-            } else if constexpr (std::is_same_v<T, float>) {
-                if (val == 0.0f && !std::signbit(val)) {
-                    w.write_u8(TC18_FloatZero);
-                } else {
-                    w.write_u8(TC18_Float);
-                    w.write_f32_le(val);
-                }
-                return {};
-            } else if constexpr (std::is_same_v<T, double>) {
-                if (val == 0.0 && !std::signbit(val)) {
-                    w.write_u8(TC18_DoubleZero);
-                } else {
-                    w.write_u8(TC18_Double);
-                    w.write_f64_le(val);
-                }
-                return {};
-            } else if constexpr (std::is_same_v<T, std::string>) {
-                w.write_u8(TC18_String);
-                return write_string_payload(w, val);
-            } else if constexpr (std::is_same_v<T, ByteArray>) {
-                w.write_u8(TC18_ByteArray);
-                return encode_byte_array_body(w, val);
-            } else if constexpr (std::is_same_v<T, std::vector<bool>>) {
-                w.write_u8(TC18_BooleanArray);
-                return encode_bool_array_body<decltype(encode_typed)>(w, val);
-            } else if constexpr (std::is_same_v<T, std::vector<int16_t>>) {
-                w.write_u8(TC18_ShortArray);
-                return encode_short_array_body(w, val);
-            } else if constexpr (std::is_same_v<T, std::vector<int32_t>>) {
-                w.write_u8(TC18_CompressedIntArray);
-                return encode_int_array_body(w, val);
-            } else if constexpr (std::is_same_v<T, std::vector<int64_t>>) {
-                w.write_u8(TC18_CompressedLongArray);
-                return encode_long_array_body(w, val);
-            } else if constexpr (std::is_same_v<T, std::vector<float>>) {
-                w.write_u8(TC18_FloatArray);
-                return encode_float_array_body(w, val);
-            } else if constexpr (std::is_same_v<T, std::vector<double>>) {
-                w.write_u8(TC18_DoubleArray);
-                return encode_double_array_body(w, val);
-            } else if constexpr (std::is_same_v<T, std::vector<std::string>>) {
-                w.write_u8(TC18_StringArray);
-                return encode_string_array_body(w, val);
-            } else if constexpr (std::is_same_v<T, ObjectArray>) {
-                w.write_u8(TC18_ObjectArray);
-                return encode_object_array_body(w, val, depth, encode_typed);
-            } else if constexpr (std::is_same_v<T, JaggedArray>) {
-                // quirk: always writes type code 0x40
-                w.write_u8(TC18_Array);
-                return encode_jagged_array_body(w, val, depth, encode_typed);
-            } else if constexpr (std::is_same_v<T, Dictionary>) {
-                const auto hdr = byte_object_header_desc();
-                w.write_u8(TC18_Dictionary);
-                write_byte_array(w, hdr.raw);
-                return encode_dictionary_body_from_header(w, hdr, val, depth, encode_typed);
-            } else if constexpr (std::is_same_v<T, GenericDictionary>) {
-                if (val.header.empty())
-                    return err(Error::Code::InvalidValue, "generic dictionary missing header");
-
-                LUXON_TRY_ASSIGN(hdr, parse_dict_header_bytes(std::span<const uint8_t>(val.header.data(), val.header.size()), false));
-                w.write_u8(TC18_Dictionary);
-                write_byte_array(w, val.header);
-                return encode_dictionary_body_from_header(w, hdr, val, depth, encode_typed);
-            } else if constexpr (std::is_same_v<T, HashtablePtr>) {
-                w.write_u8(TC18_Hashtable);
-                return encode_hashtable_body(w, val, depth, encode_typed);
-            } else if constexpr (std::is_same_v<T, RawCustomValue>) {
-                return encode_custom_typed(w, val);
-            } else if constexpr (std::is_same_v<T, EventMessage>) {
-                w.write_u8(TC18_EventData);
-                w.write_u8(val.event_code);
-                return encode_parameters(w, val.parameters, depth);
-            } else if constexpr (std::is_same_v<T, OperationRequestMessage>) {
-                w.write_u8(TC18_OperationRequest);
-                w.write_u8(val.operation_code);
-                return encode_parameters(w, val.parameters, depth);
-            } else if constexpr (std::is_same_v<T, OperationResponseMessage>) {
-                w.write_u8(TC18_OperationResponse);
-                w.write_u8(val.operation_code);
-                w.write_i16_le(val.return_code);
-                if (!val.debug_message || val.debug_message->empty()) {
-                    w.write_u8(TC18_Null);
-                } else {
-                    w.write_u8(TC18_String);
-                    LUXON_TRY(write_string_payload(w, *val.debug_message));
-                }
-                return encode_parameters(w, val.parameters, depth);
-            } else if constexpr (std::is_same_v<T, std::vector<Dictionary>>) {
-                // quirk: always writes type code 0x54
-                const auto hdr = byte_object_header_desc();
-                w.write_u8(TC18_DictionaryArray);
-                write_byte_array(w, hdr.raw);
-
-                if (val.size() > std::numeric_limits<uint32_t>::max())
-                    return err(Error::Code::InvalidValue, "dictionary array too large");
-
-                w.write_varuint32(static_cast<uint32_t>(val.size()));
-                for (const auto& elem : val)
-                    LUXON_TRY(encode_dictionary_body_from_header(w, hdr, elem, depth, encode_typed));
-                return {};
-            } else if constexpr (std::is_same_v<T, std::vector<GenericDictionary>>) {
-                if (val.empty())
-                    return err(Error::Code::InvalidValue, "cannot encode empty exact dictionary array without header");
-
-                const auto& first = val.front();
-                if (first.header.empty())
-                    return err(Error::Code::InvalidValue, "generic dictionary array element missing header");
-
-                LUXON_TRY_ASSIGN(hdr, parse_dict_header_bytes(std::span<const uint8_t>(first.header.data(), first.header.size()), false));
-
-                for (const auto& elem : val) {
-                    if (elem.header != first.header)
-                        return err(Error::Code::InvalidValue, "dictionary array elements have mismatched headers");
-                }
-
-                w.write_u8(TC18_DictionaryArray);
-                write_byte_array(w, first.header);
-
-                if (val.size() > std::numeric_limits<uint32_t>::max())
-                    return err(Error::Code::InvalidValue, "dictionary array too large");
-
-                w.write_varuint32(static_cast<uint32_t>(val.size()));
-                for (const auto& elem : val)
-                    LUXON_TRY(encode_dictionary_body_from_header(w, hdr, elem, depth, encode_typed));
-                return {};
-            } else if constexpr (std::is_same_v<T, std::vector<HashtablePtr>>) {
-                w.write_u8(TC18_HashtableArray);
-                return encode_hashtable_array_body(w, val, depth, encode_typed);
-            } else if constexpr (std::is_same_v<T, std::vector<RawCustomValue>>) {
-                w.write_u8(TC18_CustomTypeArray);
-                return encode_custom_array_body(w, val);
-            } else if constexpr (std::is_same_v<T, PreSerializedValue>) {
-                write_byte_array(w, val.data);
-                return {};
+    return v.value.visit([&]<typename T>(const T& val) -> std::expected<void, Error> {
+        if constexpr (std::is_same_v<T, bool>) {
+            w.write_u8(val ? TC18_BooleanTrue : TC18_BooleanFalse);
+            return {};
+        } else if constexpr (std::is_same_v<T, uint8_t>) {
+            if (val == 0) {
+                w.write_u8(TC18_ByteZero);
             } else {
-                return err(Error::Code::InvalidValue, "unsupported Value alternative for GpBinaryV18");
+                w.write_u8(TC18_Byte);
+                w.write_u8(val);
             }
-        },
-        v.value);
+            return {};
+        } else if constexpr (std::is_same_v<T, int16_t>) {
+            if (val == 0) {
+                w.write_u8(TC18_ShortZero);
+            } else {
+                w.write_u8(TC18_Short);
+                w.write_i16_le(val);
+            }
+            return {};
+        } else if constexpr (std::is_same_v<T, int32_t>) {
+            const int32_t x = val;
+            if (x == 0) {
+                w.write_u8(TC18_IntZero);
+            } else if (x > 0 && x <= 255) {
+                w.write_u8(TC18_Int1);
+                w.write_u8(static_cast<uint8_t>(x));
+            } else if (x > 255 && x <= 65535) {
+                w.write_u8(TC18_Int2);
+                w.write_u16_le(static_cast<uint16_t>(x));
+            } else if (x < 0 && x >= -255) {
+                w.write_u8(TC18_Int1_);
+                w.write_u8(static_cast<uint8_t>(-x));
+            } else if (x < -255 && x >= -65535) {
+                w.write_u8(TC18_Int2_);
+                w.write_u16_le(static_cast<uint16_t>(-x));
+            } else {
+                w.write_u8(TC18_CompressedInt);
+                write_int32_payload(w, x);
+            }
+            return {};
+        } else if constexpr (std::is_same_v<T, int64_t>) {
+            const int64_t x = val;
+            if (x == 0) {
+                w.write_u8(TC18_LongZero);
+            } else if (x > 0 && x <= 255) {
+                w.write_u8(TC18_L1);
+                w.write_u8(static_cast<uint8_t>(x));
+            } else if (x > 255 && x <= 65535) {
+                w.write_u8(TC18_L2);
+                w.write_u16_le(static_cast<uint16_t>(x));
+            } else if (x < 0 && x >= -255) {
+                w.write_u8(TC18_L1_);
+                w.write_u8(static_cast<uint8_t>(-x));
+            } else if (x < -255 && x >= -65535) {
+                w.write_u8(TC18_L2_);
+                w.write_u16_le(static_cast<uint16_t>(-x));
+            } else {
+                w.write_u8(TC18_CompressedLong);
+                write_int64_payload(w, x);
+            }
+            return {};
+        } else if constexpr (std::is_same_v<T, float>) {
+            if (val == 0.0f && !std::signbit(val)) {
+                w.write_u8(TC18_FloatZero);
+            } else {
+                w.write_u8(TC18_Float);
+                w.write_f32_le(val);
+            }
+            return {};
+        } else if constexpr (std::is_same_v<T, double>) {
+            if (val == 0.0 && !std::signbit(val)) {
+                w.write_u8(TC18_DoubleZero);
+            } else {
+                w.write_u8(TC18_Double);
+                w.write_f64_le(val);
+            }
+            return {};
+        } else if constexpr (std::is_same_v<T, std::string>) {
+            w.write_u8(TC18_String);
+            return write_string_payload(w, val);
+        } else if constexpr (std::is_same_v<T, ByteArray>) {
+            w.write_u8(TC18_ByteArray);
+            return encode_byte_array_body(w, val);
+        } else if constexpr (std::is_same_v<T, std::vector<bool>>) {
+            w.write_u8(TC18_BooleanArray);
+            return encode_bool_array_body<decltype(encode_typed)>(w, val);
+        } else if constexpr (std::is_same_v<T, std::vector<int16_t>>) {
+            w.write_u8(TC18_ShortArray);
+            return encode_short_array_body(w, val);
+        } else if constexpr (std::is_same_v<T, std::vector<int32_t>>) {
+            w.write_u8(TC18_CompressedIntArray);
+            return encode_int_array_body(w, val);
+        } else if constexpr (std::is_same_v<T, std::vector<int64_t>>) {
+            w.write_u8(TC18_CompressedLongArray);
+            return encode_long_array_body(w, val);
+        } else if constexpr (std::is_same_v<T, std::vector<float>>) {
+            w.write_u8(TC18_FloatArray);
+            return encode_float_array_body(w, val);
+        } else if constexpr (std::is_same_v<T, std::vector<double>>) {
+            w.write_u8(TC18_DoubleArray);
+            return encode_double_array_body(w, val);
+        } else if constexpr (std::is_same_v<T, std::vector<std::string>>) {
+            w.write_u8(TC18_StringArray);
+            return encode_string_array_body(w, val);
+        } else if constexpr (std::is_same_v<T, ObjectArray>) {
+            w.write_u8(TC18_ObjectArray);
+            return encode_object_array_body(w, val, depth, encode_typed);
+        } else if constexpr (std::is_same_v<T, JaggedArray>) {
+            // quirk: always writes type code 0x40
+            w.write_u8(TC18_Array);
+            return encode_jagged_array_body(w, val, depth, encode_typed);
+        } else if constexpr (std::is_same_v<T, Dictionary>) {
+            const auto hdr = byte_object_header_desc();
+            w.write_u8(TC18_Dictionary);
+            write_byte_array(w, hdr.raw);
+            return encode_dictionary_body_from_header(w, hdr, val, depth, encode_typed);
+        } else if constexpr (std::is_same_v<T, GenericDictionary>) {
+            if (val.header.empty())
+                return err(Error::Code::InvalidValue, "generic dictionary missing header");
+
+            LUXON_TRY_ASSIGN(hdr, parse_dict_header_bytes(std::span<const uint8_t>(val.header.data(), val.header.size()), false));
+            w.write_u8(TC18_Dictionary);
+            write_byte_array(w, val.header);
+            return encode_dictionary_body_from_header(w, hdr, val, depth, encode_typed);
+        } else if constexpr (std::is_same_v<T, HashtablePtr>) {
+            w.write_u8(TC18_Hashtable);
+            return encode_hashtable_body(w, val, depth, encode_typed);
+        } else if constexpr (std::is_same_v<T, RawCustomValue>) {
+            return encode_custom_typed(w, val);
+        } else if constexpr (std::is_same_v<T, EventMessage>) {
+            w.write_u8(TC18_EventData);
+            w.write_u8(val.event_code);
+            return encode_parameters(w, val.parameters, depth);
+        } else if constexpr (std::is_same_v<T, OperationRequestMessage>) {
+            w.write_u8(TC18_OperationRequest);
+            w.write_u8(val.operation_code);
+            return encode_parameters(w, val.parameters, depth);
+        } else if constexpr (std::is_same_v<T, OperationResponseMessage>) {
+            w.write_u8(TC18_OperationResponse);
+            w.write_u8(val.operation_code);
+            w.write_i16_le(val.return_code);
+            if (!val.debug_message || val.debug_message->empty()) {
+                w.write_u8(TC18_Null);
+            } else {
+                w.write_u8(TC18_String);
+                LUXON_TRY(write_string_payload(w, *val.debug_message));
+            }
+            return encode_parameters(w, val.parameters, depth);
+        } else if constexpr (std::is_same_v<T, std::vector<Dictionary>>) {
+            // quirk: always writes type code 0x54
+            const auto hdr = byte_object_header_desc();
+            w.write_u8(TC18_DictionaryArray);
+            write_byte_array(w, hdr.raw);
+
+            if (val.size() > std::numeric_limits<uint32_t>::max())
+                return err(Error::Code::InvalidValue, "dictionary array too large");
+
+            w.write_varuint32(static_cast<uint32_t>(val.size()));
+            for (const auto& elem : val)
+                LUXON_TRY(encode_dictionary_body_from_header(w, hdr, elem, depth, encode_typed));
+            return {};
+        } else if constexpr (std::is_same_v<T, std::vector<GenericDictionary>>) {
+            if (val.empty())
+                return err(Error::Code::InvalidValue, "cannot encode empty exact dictionary array without header");
+
+            const auto& first = val.front();
+            if (first.header.empty())
+                return err(Error::Code::InvalidValue, "generic dictionary array element missing header");
+
+            LUXON_TRY_ASSIGN(hdr, parse_dict_header_bytes(std::span<const uint8_t>(first.header.data(), first.header.size()), false));
+
+            for (const auto& elem : val) {
+                if (elem.header != first.header)
+                    return err(Error::Code::InvalidValue, "dictionary array elements have mismatched headers");
+            }
+
+            w.write_u8(TC18_DictionaryArray);
+            write_byte_array(w, first.header);
+
+            if (val.size() > std::numeric_limits<uint32_t>::max())
+                return err(Error::Code::InvalidValue, "dictionary array too large");
+
+            w.write_varuint32(static_cast<uint32_t>(val.size()));
+            for (const auto& elem : val)
+                LUXON_TRY(encode_dictionary_body_from_header(w, hdr, elem, depth, encode_typed));
+            return {};
+        } else if constexpr (std::is_same_v<T, std::vector<HashtablePtr>>) {
+            w.write_u8(TC18_HashtableArray);
+            return encode_hashtable_array_body(w, val, depth, encode_typed);
+        } else if constexpr (std::is_same_v<T, std::vector<RawCustomValue>>) {
+            w.write_u8(TC18_CustomTypeArray);
+            return encode_custom_array_body(w, val);
+        } else if constexpr (std::is_same_v<T, PreSerializedValue>) {
+            write_byte_array(w, val.data);
+            return {};
+        } else {
+            return err(Error::Code::InvalidValue, "unsupported Value alternative for GpBinaryV18");
+        }
+    });
 }
 
 std::expected<Value, Error> GpBinaryV18::DecodeValue(ByteReader& r, int depth) const {

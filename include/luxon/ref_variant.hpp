@@ -186,6 +186,27 @@ public:
         emplace<T>(std::forward<U>(value));
     }
 
+    // Owning construction from C-style strings
+    template <class U>
+        requires(!is_alt_v<std::remove_cvref_t<U>>) && is_alt_v<std::string_view> && std::convertible_to<U, std::string_view>
+    ref_variant(U&& value) {
+        emplace<std::string_view>(std::forward<U>(value));
+    }
+    template <class U>
+        requires(!is_alt_v<std::remove_cvref_t<U>>) && (!is_alt_v<std::string_view>) && is_alt_v<std::string> && std::convertible_to<U, std::string>
+    ref_variant(U&& value) {
+        emplace<std::string>(std::forward<U>(value));
+    }
+
+    // Owning construction from an enum whose underlying type is an exact alternative.
+    template <class U>
+        requires std::is_enum_v<std::remove_cvref_t<U>> && is_alt_v<std::underlying_type_t<std::remove_cvref_t<U>>>
+    ref_variant(U&& value) {
+        using EnumType = std::remove_cvref_t<U>;
+        using UnderlyingT = std::underlying_type_t<EnumType>;
+        emplace<UnderlyingT>(static_cast<UnderlyingT>(value));
+    }
+
     // Non-owning construction from T* where T is an alternative.
     template <class U>
         requires std::is_pointer_v<std::remove_reference_t<U>> && (is_alt_v<std::remove_pointer_t<std::remove_reference_t<U>>>)
