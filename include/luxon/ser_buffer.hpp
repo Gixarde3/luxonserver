@@ -6,6 +6,7 @@
 #include "ser_types.hpp"
 
 #include <array>
+#include <span>
 #include <bit>
 #include <limits>
 #include <expected>

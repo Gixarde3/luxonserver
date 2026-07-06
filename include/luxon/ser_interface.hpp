@@ -8,6 +8,7 @@
 #include "ser_encryption.hpp"
 #include "ser_protocol_id.hpp"
 
+#include <span>
 #include <memory>
 
 namespace luxon::ser {
