@@ -359,7 +359,8 @@ void write_command(DatagramBuffer& out, unsigned& position, const EnetCommand& c
     }
 
     if (!cmd.is_payload_empty()) {
-        out.at(position + cmd.get_payload_size() - 1); // Quick bounds check
+        [[maybe_unused]]
+        const auto _ = out.at(position + cmd.get_payload_size() - 1); // Quick bounds check
         const auto payload = cmd.get_payload();
         std::copy(payload.begin(), payload.end(), out.begin() + position);
         position += cmd.get_payload_size();
