@@ -336,12 +336,19 @@ public:
     // Returns a NON-OWNING wrapper to the current object.
     // If *this owns the object, the returned variant references *this's internal storage.
     [[nodiscard]]
-    ref_variant decay() & noexcept {
+    ref_variant as_ref() const& noexcept {
         return from_raw_index(index_, ptr_);
     }
 
     [[nodiscard]]
-    ref_variant decay() && = delete;
+    ref_variant as_ref() && = delete;
+
+    [[nodiscard]]
+    ref_variant clone() const {
+        ref_variant cloned(no_init_t{});
+        visit([&cloned]<class T>(const T& x) { cloned.template emplace<T>(x); });
+        return cloned;
+    }
 
     [[nodiscard]]
     void *raw_pointer() noexcept {

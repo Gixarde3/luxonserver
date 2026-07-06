@@ -243,6 +243,9 @@ struct Value {
         return std::nullopt;
     }
 
+    Value as_ref() const { return Value{value.as_ref()}; }
+    Value clone() const { return Value{value.clone()}; }
+
     bool operator==(const Value& other) const;
 };
 
