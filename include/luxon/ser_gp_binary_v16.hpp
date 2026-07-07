@@ -28,5 +28,8 @@ public:
 
 private:
     static constexpr int MAX_DEPTH = 32;
+
+    std::expected<void, Error> encode_value_with_type_flag(ByteWriter& w, const Value& v, int depth, bool write_type) const;
+    std::expected<Value, Error> decode_value_payload(ByteReader& r, uint8_t tc, int depth) const;
 };
 } // namespace luxon::ser

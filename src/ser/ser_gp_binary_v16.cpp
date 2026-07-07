@@ -44,6 +44,48 @@ inline std::expected<void, Error> ensure_u32_size(std::size_t n, const char *wha
         return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = std::string(what) + " too large for u32"});
     return {};
 }
+
+static uint8_t get_type_code(const Value& v) {
+    return v.value.visit([](const auto& a) -> uint8_t {
+        using T = std::decay_t<decltype(a)>;
+
+        if constexpr (std::is_same_v<T, std::monostate>)
+            return TC16_Null;
+        else if constexpr (std::is_same_v<T, bool>)
+            return TC16_Boolean;
+        else if constexpr (std::is_same_v<T, uint8_t>)
+            return TC16_Byte;
+        else if constexpr (std::is_same_v<T, int16_t>)
+            return TC16_Int16;
+        else if constexpr (std::is_same_v<T, int32_t>)
+            return TC16_Int32;
+        else if constexpr (std::is_same_v<T, int64_t>)
+            return TC16_Int64;
+        else if constexpr (std::is_same_v<T, float>)
+            return TC16_Float;
+        else if constexpr (std::is_same_v<T, double>)
+            return TC16_Double;
+        else if constexpr (std::is_same_v<T, std::string>)
+            return TC16_String;
+        else if constexpr (std::is_same_v<T, ByteArray>)
+            return TC16_ByteArray;
+        else if constexpr (std::is_same_v<T, std::vector<std::string>>)
+            return TC16_StringArray;
+        else if constexpr (std::is_same_v<T, ObjectArray>)
+            return TC16_ObjectArray;
+        else if constexpr (std::is_same_v<T, Dictionary> || std::is_same_v<T, GenericDictionary>)
+            return TC16_Dictionary;
+        else if constexpr (std::is_same_v<T, std::shared_ptr<Hashtable>>)
+            return TC16_Hashtable;
+        else if constexpr (std::is_same_v<T, RawCustomValue>)
+            return TC16_Custom;
+        else if constexpr (std::is_same_v<T, std::vector<bool>> || std::is_same_v<T, std::vector<int16_t>> || std::is_same_v<T, std::vector<int32_t>> ||
+                           std::is_same_v<T, std::vector<int64_t>> || std::is_same_v<T, std::vector<float>> || std::is_same_v<T, std::vector<double>>) {
+            return TC16_GenericArray;
+        }
+        return TC16_Unknown;
+    });
+}
 } // namespace
 
 // -------------------- V16 u16-string helpers --------------------
@@ -117,203 +159,230 @@ std::expected<ParameterList, Error> GpBinaryV16::decode_parameters(ByteReader& r
     return out;
 }
 
-// -------------------- Typed values --------------------
-
-std::expected<void, Error> GpBinaryV16::EncodeValue(ByteWriter& w, const Value& v, int depth) const {
+std::expected<void, Error> GpBinaryV16::encode_value_with_type_flag(ByteWriter& w, const Value& v, int depth, bool write_type) const {
     if (depth > MAX_DEPTH)
         return std::unexpected(Error{.code = Error::Code::DepthLimit, .message = "value depth limit"});
 
-    return v.value.visit(
-        [&](const auto& a) -> std::expected<void, Error> {
-            using T = std::decay_t<decltype(a)>;
+    return v.value.visit([&](const auto& a) -> std::expected<void, Error> {
+        using T = std::decay_t<decltype(a)>;
 
-            if constexpr (std::is_same_v<T, std::monostate>) {
+        if constexpr (std::is_same_v<T, std::monostate>) {
+            if (write_type)
                 w.write_u8(TC16_Null);
-                return {};
-            } else if constexpr (std::is_same_v<T, bool>) {
+            return {};
+        } else if constexpr (std::is_same_v<T, bool>) {
+            if (write_type)
                 w.write_u8(TC16_Boolean);
-                w.write_u8(a ? 1 : 0);
-                return {};
-            } else if constexpr (std::is_same_v<T, uint8_t>) {
+            w.write_u8(a ? 1 : 0);
+            return {};
+        } else if constexpr (std::is_same_v<T, uint8_t>) {
+            if (write_type)
                 w.write_u8(TC16_Byte);
-                w.write_u8(a);
-                return {};
-            } else if constexpr (std::is_same_v<T, int16_t>) {
+            w.write_u8(a);
+            return {};
+        } else if constexpr (std::is_same_v<T, int16_t>) {
+            if (write_type)
                 w.write_u8(TC16_Int16);
-                w.write_i16_be(a);
-                return {};
-            } else if constexpr (std::is_same_v<T, int32_t>) {
+            w.write_i16_be(a);
+            return {};
+        } else if constexpr (std::is_same_v<T, int32_t>) {
+            if (write_type)
                 w.write_u8(TC16_Int32);
-                w.write_i32_be(a);
-                return {};
-            } else if constexpr (std::is_same_v<T, int64_t>) {
+            w.write_i32_be(a);
+            return {};
+        } else if constexpr (std::is_same_v<T, int64_t>) {
+            if (write_type)
                 w.write_u8(TC16_Int64);
-                w.write_i64_be(a);
-                return {};
-            } else if constexpr (std::is_same_v<T, float>) {
+            w.write_i64_be(a);
+            return {};
+        } else if constexpr (std::is_same_v<T, float>) {
+            if (write_type)
                 w.write_u8(TC16_Float);
-                w.write_f32_be(a);
-                return {};
-            } else if constexpr (std::is_same_v<T, double>) {
+            w.write_f32_be(a);
+            return {};
+        } else if constexpr (std::is_same_v<T, double>) {
+            if (write_type)
                 w.write_u8(TC16_Double);
-                w.write_f64_be(a);
-                return {};
-            } else if constexpr (std::is_same_v<T, std::string>) {
+            w.write_f64_be(a);
+            return {};
+        } else if constexpr (std::is_same_v<T, std::string>) {
+            if (write_type)
                 w.write_u8(TC16_String);
-                return write_string_u16(w, a);
-            } else if constexpr (std::is_same_v<T, ByteArray>) {
-                // optimized byte[]: 'x' + i32 length + raw bytes
-                auto ok = ensure_u32_size(a.size(), "byte[] length");
-                if (!ok)
-                    return std::unexpected(ok.error());
+            return write_string_u16(w, a);
+        } else if constexpr (std::is_same_v<T, ByteArray>) {
+            auto ok = ensure_u32_size(a.size(), "byte[] length");
+            if (!ok)
+                return std::unexpected(ok.error());
 
+            if (write_type)
                 w.write_u8(TC16_ByteArray);
-                w.write_u32_be(static_cast<uint32_t>(a.size()));
-                w.write_bytes(a);
-                return {};
-            } else if constexpr (std::is_same_v<T, std::vector<std::string>>) {
-                // optimized string[]: 'a' + u16 count + (u16 len + bytes)...
-                auto ok = ensure_u16_size(a.size(), "string[] count");
-                if (!ok)
-                    return std::unexpected(ok.error());
+            w.write_u32_be(static_cast<uint32_t>(a.size()));
+            w.write_bytes(a);
+            return {};
+        } else if constexpr (std::is_same_v<T, std::vector<std::string>>) {
+            auto ok = ensure_u16_size(a.size(), "string[] count");
+            if (!ok)
+                return std::unexpected(ok.error());
 
+            if (write_type)
                 w.write_u8(TC16_StringArray);
-                w.write_u16_be(static_cast<uint16_t>(a.size()));
-                for (const auto& s : a) {
-                    auto encs = write_string_u16(w, s);
-                    if (!encs)
-                        return std::unexpected(encs.error());
-                }
-                return {};
-            } else if constexpr (std::is_same_v<T, ObjectArray>) {
-                // object[]: 'z' + u16 count + each element (typed)
-                auto ok = ensure_u16_size(a.size(), "object[] count");
-                if (!ok)
-                    return std::unexpected(ok.error());
-
-                w.write_u8(TC16_ObjectArray);
-                w.write_u16_be(static_cast<uint16_t>(a.size()));
-                for (const auto& e : a) {
-                    auto enc = EncodeValue(w, e, depth + 1);
-                    if (!enc)
-                        return std::unexpected(enc.error());
-                }
-                return {};
-            } else if constexpr (std::is_same_v<T, Dictionary>) {
-                // dictionary: 'D' + keyType + valueType + u16 count + entries...
-                // We encode keyType=byte, valueType=unknown (0) to allow heterogenous values.
-                auto ok = ensure_u16_size(a.size(), "dictionary count");
-                if (!ok)
-                    return std::unexpected(ok.error());
-
-                w.write_u8(TC16_Dictionary);
-                w.write_u8(TC16_Byte);
-                w.write_u8(TC16_Unknown);
-                w.write_u16_be(static_cast<uint16_t>(a.size()));
-                for (const auto& [k, val] : a) {
-                    w.write_u8(k);
-                    auto enc = EncodeValue(w, val, depth + 1);
-                    if (!enc)
-                        return std::unexpected(enc.error());
-                }
-                return {};
-            } else if constexpr (std::is_same_v<T, std::shared_ptr<Hashtable>>) {
-                // hashtable: 'h' + u16 count + (key,value) objects
-                w.write_u8(TC16_Hashtable);
-                if (!a) {
-                    w.write_u16_be(0);
-                    return {};
-                }
-
-                auto ok = ensure_u16_size(a->size(), "hashtable count");
-                if (!ok)
-                    return std::unexpected(ok.error());
-
-                w.write_u16_be(static_cast<uint16_t>(a->size()));
-                for (const auto& [k, val] : *a) {
-                    auto ek = EncodeValue(w, k, depth + 1);
-                    if (!ek)
-                        return std::unexpected(ek.error());
-                    auto ev = EncodeValue(w, val, depth + 1);
-                    if (!ev)
-                        return std::unexpected(ev.error());
-                }
-                return {};
-            } else if constexpr (std::is_same_v<T, RawCustomValue>) {
-                // custom: 'c' + code + u16 length + bytes
-                auto ok = ensure_u16_size(a.data.size(), "custom payload length");
-                if (!ok)
-                    return std::unexpected(ok.error());
-
-                w.write_u8(TC16_Custom);
-                w.write_u8(a.custom_code);
-                w.write_u16_be(static_cast<uint16_t>(a.data.size()));
-                w.write_bytes(a.data);
-                return {};
-            } else if constexpr (std::is_same_v<T, std::string> || std::is_same_v<T, std::vector<bool>> || std::is_same_v<T, std::vector<int16_t>> ||
-                                 std::is_same_v<T, std::vector<int32_t>> || std::is_same_v<T, std::vector<int64_t>> || std::is_same_v<T, std::vector<float>> ||
-                                 std::is_same_v<T, std::vector<double>>) {
-                // Generic array: 'y' + u16 count + elementType + raw element payloads (no per-element headers)
-                auto ok = ensure_u16_size(a.size(), "generic array count");
-                if (!ok)
-                    return std::unexpected(ok.error());
-
-                w.write_u8(TC16_GenericArray);
-                w.write_u16_be(static_cast<uint16_t>(a.size()));
-
-                if constexpr (std::is_same_v<T, std::string>) {
-                    w.write_u8(TC16_String);
-                    for (const auto& s : a) {
-                        auto encs = write_string_u16(w, s);
-                        if (!encs)
-                            return std::unexpected(encs.error());
-                    }
-                } else if constexpr (std::is_same_v<T, std::vector<bool>>) {
-                    w.write_u8(TC16_Boolean);
-                    for (bool b : a)
-                        w.write_u8(b ? 1 : 0);
-                } else if constexpr (std::is_same_v<T, std::vector<int16_t>>) {
-                    w.write_u8(TC16_Int16);
-                    for (int16_t x : a)
-                        w.write_i16_be(x);
-                } else if constexpr (std::is_same_v<T, std::vector<int32_t>>) {
-                    w.write_u8(TC16_Int32);
-                    for (int32_t x : a)
-                        w.write_i32_be(x);
-                } else if constexpr (std::is_same_v<T, std::vector<int64_t>>) {
-                    w.write_u8(TC16_Int64);
-                    for (int64_t x : a)
-                        w.write_i64_be(x);
-                } else if constexpr (std::is_same_v<T, std::vector<float>>) {
-                    w.write_u8(TC16_Float);
-                    for (float x : a)
-                        w.write_f32_be(x);
-                } else if constexpr (std::is_same_v<T, std::vector<double>>) {
-                    w.write_u8(TC16_Double);
-                    for (double x : a)
-                        w.write_f64_be(x);
-
-                } else if constexpr (std::is_same_v<T, PreSerializedValue>) {
-                    w.write_bytes(a.data);
-                }
-                return {};
-            } else {
-                return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "unsupported variant member for GpBinaryV16"});
+            w.write_u16_be(static_cast<uint16_t>(a.size()));
+            for (const auto& s : a) {
+                auto encs = write_string_u16(w, s);
+                if (!encs)
+                    return std::unexpected(encs.error());
             }
-        });
+            return {};
+        } else if constexpr (std::is_same_v<T, ObjectArray>) {
+            auto ok = ensure_u16_size(a.size(), "object[] count");
+            if (!ok)
+                return std::unexpected(ok.error());
+
+            if (write_type)
+                w.write_u8(TC16_ObjectArray);
+            w.write_u16_be(static_cast<uint16_t>(a.size()));
+            for (const auto& e : a) {
+                auto enc = EncodeValue(w, e, depth + 1);
+                if (!enc)
+                    return std::unexpected(enc.error());
+            }
+            return {};
+        } else if constexpr (std::is_same_v<T, Dictionary>) {
+            auto ok = ensure_u16_size(a.size(), "dictionary count");
+            if (!ok)
+                return std::unexpected(ok.error());
+
+            if (write_type)
+                w.write_u8(TC16_Dictionary);
+            w.write_u8(TC16_Byte);
+            w.write_u8(TC16_Unknown);
+            w.write_u16_be(static_cast<uint16_t>(a.size()));
+            for (const auto& [k, val] : a) {
+                w.write_u8(k);
+                auto enc = EncodeValue(w, val, depth + 1);
+                if (!enc)
+                    return std::unexpected(enc.error());
+            }
+            return {};
+        } else if constexpr (std::is_same_v<T, GenericDictionary>) {
+            auto ok = ensure_u16_size(a.entries.size(), "dictionary count");
+            if (!ok)
+                return std::unexpected(ok.error());
+
+            if (a.header.size() != 2)
+                return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "v16 generic dictionary header must be 2 bytes"});
+
+            if (write_type)
+                w.write_u8(TC16_Dictionary);
+            w.write_bytes(a.header);
+            w.write_u16_be(static_cast<uint16_t>(a.entries.size()));
+
+            bool write_k = (a.header[0] == 0 || a.header[0] == 42);
+            bool write_v = (a.header[1] == 0 || a.header[1] == 42);
+
+            for (const auto& [k, val] : a.entries) {
+                if (!write_k && k.is_null())
+                    return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "Cannot serialize null key in typed dictionary"});
+                if (!write_v && val.is_null())
+                    return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "Cannot serialize null value in typed dictionary"});
+
+                if (!write_k && get_type_code(k) != a.header[0])
+                    return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "Key type mismatch in typed dictionary"});
+                if (!write_v && get_type_code(val) != a.header[1])
+                    return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "Value type mismatch in typed dictionary"});
+
+                auto enc_k = encode_value_with_type_flag(w, k, depth + 1, write_k);
+                if (!enc_k)
+                    return std::unexpected(enc_k.error());
+
+                auto enc_v = encode_value_with_type_flag(w, val, depth + 1, write_v);
+                if (!enc_v)
+                    return std::unexpected(enc_v.error());
+            }
+            return {};
+        } else if constexpr (std::is_same_v<T, std::shared_ptr<Hashtable>>) {
+            if (write_type)
+                w.write_u8(TC16_Hashtable);
+            if (!a) {
+                w.write_u16_be(0);
+                return {};
+            }
+
+            auto ok = ensure_u16_size(a->size(), "hashtable count");
+            if (!ok)
+                return std::unexpected(ok.error());
+
+            w.write_u16_be(static_cast<uint16_t>(a->size()));
+            for (const auto& [k, val] : *a) {
+                auto ek = EncodeValue(w, k, depth + 1);
+                if (!ek)
+                    return std::unexpected(ek.error());
+                auto ev = EncodeValue(w, val, depth + 1);
+                if (!ev)
+                    return std::unexpected(ev.error());
+            }
+            return {};
+        } else if constexpr (std::is_same_v<T, RawCustomValue>) {
+            auto ok = ensure_u16_size(a.data.size(), "custom payload length");
+            if (!ok)
+                return std::unexpected(ok.error());
+
+            if (write_type)
+                w.write_u8(TC16_Custom);
+            w.write_u8(a.custom_code);
+            w.write_u16_be(static_cast<uint16_t>(a.data.size()));
+            w.write_bytes(a.data);
+            return {};
+        } else if constexpr (std::is_same_v<T, PreSerializedValue>) {
+            w.write_bytes(a.data);
+            return {};
+        } else if constexpr (std::is_same_v<T, std::vector<bool>> || std::is_same_v<T, std::vector<int16_t>> || std::is_same_v<T, std::vector<int32_t>> ||
+                             std::is_same_v<T, std::vector<int64_t>> || std::is_same_v<T, std::vector<float>> || std::is_same_v<T, std::vector<double>>) {
+            auto ok = ensure_u16_size(a.size(), "generic array count");
+            if (!ok)
+                return std::unexpected(ok.error());
+
+            if (write_type)
+                w.write_u8(TC16_GenericArray);
+            w.write_u16_be(static_cast<uint16_t>(a.size()));
+
+            if constexpr (std::is_same_v<T, std::vector<bool>>) {
+                w.write_u8(TC16_Boolean);
+                for (bool b : a)
+                    w.write_u8(b ? 1 : 0);
+            } else if constexpr (std::is_same_v<T, std::vector<int16_t>>) {
+                w.write_u8(TC16_Int16);
+                for (int16_t x : a)
+                    w.write_i16_be(x);
+            } else if constexpr (std::is_same_v<T, std::vector<int32_t>>) {
+                w.write_u8(TC16_Int32);
+                for (int32_t x : a)
+                    w.write_i32_be(x);
+            } else if constexpr (std::is_same_v<T, std::vector<int64_t>>) {
+                w.write_u8(TC16_Int64);
+                for (int64_t x : a)
+                    w.write_i64_be(x);
+            } else if constexpr (std::is_same_v<T, std::vector<float>>) {
+                w.write_u8(TC16_Float);
+                for (float x : a)
+                    w.write_f32_be(x);
+            } else if constexpr (std::is_same_v<T, std::vector<double>>) {
+                w.write_u8(TC16_Double);
+                for (double x : a)
+                    w.write_f64_be(x);
+            }
+            return {};
+        } else {
+            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "unsupported variant member for GpBinaryV16"});
+        }
+    });
 }
 
-std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) const {
+std::expected<Value, Error> GpBinaryV16::decode_value_payload(ByteReader& r, uint8_t tc, int depth) const {
     if (depth > MAX_DEPTH)
         return std::unexpected(Error{.code = Error::Code::DepthLimit, .message = "value depth limit"});
 
-    auto tc = r.read_u8();
-    if (!tc)
-        return std::unexpected(tc.error());
-
-    uint8_t t = *tc;
-
-    switch (t) {
+    switch (tc) {
     case TC16_Unknown:
     case TC16_Null:
         return Value(std::monostate{});
@@ -326,56 +395,48 @@ std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) c
             return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "boolean not 0/1"});
         return Value(*b == 1);
     }
-
     case TC16_Byte: {
         auto b = r.read_u8();
         if (!b)
             return std::unexpected(b.error());
         return Value(*b);
     }
-
     case TC16_Int16: {
         auto v = r.read_i16_be();
         if (!v)
             return std::unexpected(v.error());
         return Value(*v);
     }
-
     case TC16_Int32: {
         auto v = r.read_i32_be();
         if (!v)
             return std::unexpected(v.error());
         return Value(*v);
     }
-
     case TC16_Int64: {
         auto v = r.read_i64_be();
         if (!v)
             return std::unexpected(v.error());
         return Value(*v);
     }
-
     case TC16_Float: {
         auto v = r.read_f32_be();
         if (!v)
             return std::unexpected(v.error());
         return Value(*v);
     }
-
     case TC16_Double: {
         auto v = r.read_f64_be();
         if (!v)
             return std::unexpected(v.error());
         return Value(*v);
     }
-
     case TC16_String: {
         auto s = read_string_u16(r);
         if (!s)
             return std::unexpected(s.error());
         return Value(std::move(*s));
     }
-
     case TC16_ByteArray: {
         auto len = r.read_u32_be();
         if (!len)
@@ -387,7 +448,6 @@ std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) c
 
         return Value(ByteArray(bytes->begin(), bytes->end()));
     }
-
     case TC16_IntArray: {
         auto count = r.read_u16_be();
         if (!count)
@@ -403,7 +463,6 @@ std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) c
         }
         return Value(std::move(out));
     }
-
     case TC16_StringArray: {
         auto count = r.read_u16_be();
         if (!count)
@@ -419,7 +478,6 @@ std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) c
         }
         return Value(std::move(out));
     }
-
     case TC16_ObjectArray: {
         auto count = r.read_u16_be();
         if (!count)
@@ -435,7 +493,6 @@ std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) c
         }
         return Value(std::move(out));
     }
-
     case TC16_GenericArray: {
         auto count = r.read_u16_be();
         if (!count)
@@ -448,7 +505,6 @@ std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) c
         uint16_t n = *count;
         uint8_t elem_tc = *et;
 
-        // If element type is unknown/null, elements are individually typed.
         if (elem_tc == TC16_Unknown || elem_tc == TC16_Null) {
             ObjectArray out;
             out.reserve(n);
@@ -545,9 +601,7 @@ std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) c
             return std::unexpected(Error{.code = Error::Code::UnsupportedTypeCode, .message = "unsupported generic array element type"});
         }
     }
-
     case TC16_Dictionary: {
-        // Dictionary header: keyType + valueType
         auto kt = r.read_u8();
         if (!kt)
             return std::unexpected(kt.error());
@@ -559,25 +613,42 @@ std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) c
         if (!count)
             return std::unexpected(count.error());
 
-        // This implementation only supports Dictionary<byte, object>
-        if (*kt != TC16_Byte)
-            return std::unexpected(Error{.code = Error::Code::InvalidValue, .message = "only dictionary<byte,*> supported"});
-        (void)vt; // ignored; values are decoded as typed objects
+        bool flag_k = (*kt == 0 || *kt == 42);
+        bool flag_v = (*vt == 0 || *vt == 42);
 
-        Dictionary out;
-        out.reserve(*count);
+        if (*kt == TC16_Byte && flag_v) {
+            Dictionary out;
+            out.reserve(*count);
+            for (uint32_t i = 0; i < *count; ++i) {
+                auto key = r.read_u8();
+                if (!key)
+                    return std::unexpected(key.error());
+                auto val = DecodeValue(r, depth + 1);
+                if (!val)
+                    return std::unexpected(val.error());
+                out[*key] = std::move(*val);
+            }
+            return Value(std::move(out));
+        }
+
+        GenericDictionary out;
+        out.header.push_back(*kt);
+        out.header.push_back(*vt);
+        out.entries.reserve(*count);
         for (uint32_t i = 0; i < *count; ++i) {
-            auto key = r.read_u8();
-            if (!key)
-                return std::unexpected(key.error());
-            auto val = DecodeValue(r, depth + 1);
-            if (!val)
-                return std::unexpected(val.error());
-            out[*key] = std::move(*val);
+            // Depending on header flags, explicitly call `decode_value_payload` with passed TC
+            std::expected<Value, Error> k_val = flag_k ? DecodeValue(r, depth + 1) : decode_value_payload(r, *kt, depth + 1);
+            if (!k_val)
+                return std::unexpected(k_val.error());
+
+            std::expected<Value, Error> v_val = flag_v ? DecodeValue(r, depth + 1) : decode_value_payload(r, *vt, depth + 1);
+            if (!v_val)
+                return std::unexpected(v_val.error());
+
+            out.entries.emplace_back(std::move(*k_val), std::move(*v_val));
         }
         return Value(std::move(out));
     }
-
     case TC16_Hashtable: {
         auto count = r.read_u16_be();
         if (!count)
@@ -595,7 +666,6 @@ std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) c
         }
         return Value(ht);
     }
-
     case TC16_Custom: {
         auto code = r.read_u8();
         if (!code)
@@ -612,10 +682,24 @@ std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) c
         RawCustomValue cv{.custom_code = *code, .data = ByteArray(bytes->begin(), bytes->end())};
         return Value(std::move(cv));
     }
-
     default:
         return std::unexpected(Error{.code = Error::Code::UnsupportedTypeCode, .message = "unknown type code"});
     }
+}
+
+// -------------------- Typed values --------------------
+
+std::expected<void, Error> GpBinaryV16::EncodeValue(ByteWriter& w, const Value& v, int depth) const { return encode_value_with_type_flag(w, v, depth, true); }
+
+std::expected<Value, Error> GpBinaryV16::DecodeValue(ByteReader& r, int depth) const {
+    if (depth > MAX_DEPTH)
+        return std::unexpected(Error{.code = Error::Code::DepthLimit, .message = "value depth limit"});
+
+    auto tc = r.read_u8();
+    if (!tc)
+        return std::unexpected(tc.error());
+
+    return decode_value_payload(r, *tc, depth);
 }
 
 // -------------------- Serialize --------------------
@@ -630,7 +714,7 @@ std::expected<ByteArray, Error> GpBinaryV16::Serialize(const Message& message) {
         if constexpr (std::is_same_v<T, InitMessage>) {
             kind = Kind::Init;
 
-            // fixed 39 bytes payload (matches existing V18 layout used by this library)
+            // fixed 39 bytes payload (matches V18 layout)
             payload.write_u8(m.protocol_major);
             payload.write_u8(m.protocol_minor);
             payload.write_u8(static_cast<uint8_t>((m.client_sdk_id << 1) & 0xFE));
@@ -735,13 +819,12 @@ std::expected<ByteArray, Error> GpBinaryV16::Serialize(const Message& message) {
     if (!final_payload)
         return std::unexpected(final_payload.error());
 
-    // Outer packet wrapper matches the library's GP framing:
     // [magic=0xF3][kind|encflag][payload...]
     ByteWriter packet;
     packet.write_u8(GP_MAGIC);
 
     uint8_t b1 = static_cast<uint8_t>(kind) & 0x7F;
-    // Set the high bit if encrypted
+    // Set high bit if encrypted
     if (allow_encrypt)
         b1 |= 0x80;
     packet.write_u8(b1);
