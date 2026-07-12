@@ -202,3 +202,22 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     #    luxon_enet luxon_ser luxon_visualizer
     #)
 endif()
+
+
+option(LUXON_BUILD_C "Build C bindings" OFF)
+option(LUXON_BUILD_C_SHARED "Build C bindings as shared libraries" ON)
+
+if (LUXON_BUILD_C)
+    if (LUXON_BUILD_C_SHARED)
+        set(LUXON_C_TYPE SHARED)
+    else()
+        set(LUXON_C_TYPE STATIC)
+    endif()
+
+    add_library(luxon_enet_c ${LUXON_C_TYPE} include/luxon/c/luxon_enet_c.h src/c/luxon_enet_c.cpp)
+    target_link_libraries(luxon_enet_c PRIVATE luxon_enet)
+    target_include_directories(luxon_enet_c PUBLIC include PRIVATE include/luxon/c)
+    add_library(luxon_ser_c ${LUXON_C_TYPE} include/luxon/c/luxon_ser_c.h src/c/luxon_ser_c.cpp)
+    target_link_libraries(luxon_ser_c PRIVATE luxon_ser)
+    target_include_directories(luxon_ser_c PUBLIC include PRIVATE include/luxon/c)
+endif()
