@@ -213,6 +213,38 @@ void luxon_enet_peer_service(luxon_enet_peer_t *peer) {
 
 int16_t luxon_enet_peer_get_id(const luxon_enet_peer_t *peer) { return (peer && peer->peer) ? peer->peer->peer_id() : -1; }
 
+size_t luxon_enet_peer_get_remote_ip(const luxon_enet_peer_t *peer, char *out_ip, size_t max_len) {
+    if (max_len < 1)
+        return 0;
+    out_ip[0] = '\0';
+
+    if (!peer || !peer->peer)
+        return 0;
+
+    const auto& ep = peer->peer->remote_endpoint();
+    if (!ep)
+        return 0;
+
+    const std::string ip_str = ep->get_ip();
+    std::string_view ip_view(ip_str);
+
+    const size_t copy_len = std::min(ip_view.size(), max_len - 1);
+    ip_view.copy(out_ip, copy_len);
+    out_ip[copy_len] = '\0';
+    return ip_view.size();
+}
+
+uint16_t luxon_enet_peer_get_remote_port(const luxon_enet_peer_t *peer) {
+    if (!peer || !peer->peer)
+        return 0;
+
+    const auto& ep = peer->peer->remote_endpoint();
+    if (!ep)
+        return 0;
+
+    return ep->get_port();
+}
+
 luxon_enet_connection_state_t luxon_enet_peer_get_state(const luxon_enet_peer_t *peer) {
     return (peer && peer->peer) ? static_cast<luxon_enet_connection_state_t>(peer->peer->state()) : LUXON_ENET_CONN_DISCONNECTED;
 }

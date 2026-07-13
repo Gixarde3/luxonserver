@@ -92,6 +92,8 @@ struct EnetEndpoint {
 
     bool operator==(const EnetEndpoint& o) const;
     bool operator<(const EnetEndpoint& o) const;
+    std::string get_ip() const;
+    uint16_t get_port() const;
     std::string to_string() const;
 };
 

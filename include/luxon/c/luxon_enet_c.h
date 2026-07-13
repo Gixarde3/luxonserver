@@ -106,6 +106,8 @@ void luxon_enet_peer_service(luxon_enet_peer_t *peer);
 
 // Accessors
 int16_t luxon_enet_peer_get_id(const luxon_enet_peer_t *peer);
+size_t luxon_enet_peer_get_remote_ip(const luxon_enet_peer_t *peer, char *out_ip, size_t max_len);
+uint16_t luxon_enet_peer_get_remote_port(const luxon_enet_peer_t *peer);
 luxon_enet_connection_state_t luxon_enet_peer_get_state(const luxon_enet_peer_t *peer);
 int luxon_enet_peer_get_rtt(const luxon_enet_peer_t *peer);
 int luxon_enet_peer_get_rtt_variance(const luxon_enet_peer_t *peer);
