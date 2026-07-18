@@ -59,13 +59,13 @@ public:
 using ParameterList = Dictionary;
 
 struct JaggedArray {
-    std::vector<Value> elements{};
+    std::vector<Value> elements;
     bool operator==(const JaggedArray& other) const;
 };
 
 struct GenericDictionary {
-    ByteArray header{};
-    std::vector<std::pair<Value, Value>> entries{};
+    ByteArray header;
+    std::vector<std::pair<Value, Value>> entries;
 
     GenericDictionary();
     ~GenericDictionary();
@@ -93,14 +93,14 @@ struct InitResponseMessage {};
 
 struct EventMessage {
     uint8_t event_code{};
-    ParameterList parameters{};
+    ParameterList parameters;
 
     bool operator==(const EventMessage& other) const;
 };
 
 struct OperationRequestMessage {
     uint8_t operation_code{};
-    ParameterList parameters{};
+    ParameterList parameters;
 
     bool operator==(const OperationRequestMessage& other) const;
 };
@@ -108,28 +108,28 @@ struct OperationRequestMessage {
 struct OperationResponseMessage {
     uint8_t operation_code{};
     int16_t return_code{};
-    std::optional<std::string> debug_message{};
-    ParameterList parameters{};
+    std::optional<std::string> debug_message;
+    ParameterList parameters;
 
     bool operator==(const OperationResponseMessage& other) const;
 };
 
 struct DisconnectMessage {
     int16_t code{};
-    std::optional<std::string> message{};
-    ParameterList parameters{};
+    std::optional<std::string> message;
+    ParameterList parameters;
 };
 
 struct InternalOperationRequestMessage {
     uint8_t operation_code{};
-    ParameterList parameters{};
+    ParameterList parameters;
 };
 
 struct InternalOperationResponseMessage {
     uint8_t operation_code{};
     int16_t return_code{};
-    std::optional<std::string> debug_message{};
-    ParameterList parameters{};
+    std::optional<std::string> debug_message;
+    ParameterList parameters;
 };
 
 struct Value {
@@ -276,11 +276,11 @@ inline Value& Value::operator=(const Hashtable& other) { return *this = std::mak
 inline Value& Value::operator=(Hashtable&& other) { return *this = std::make_shared<Hashtable>(std::move(other)); }
 
 struct GenericValueMessage {
-    Value value{};
+    Value value;
 };
 
 struct RawMessage {
-    ByteArray bytes{};
+    ByteArray bytes;
 };
 
 using MessageVariant = ref_variant<InitMessage, InitResponseMessage, OperationRequestMessage, OperationResponseMessage, EventMessage, DisconnectMessage,
@@ -305,7 +305,7 @@ struct Error {
     };
 
     Code code{Code::Ok};
-    std::string message{};
+    std::string message;
 };
 
 inline constexpr uint8_t GP_MAGIC = 0xF3;
