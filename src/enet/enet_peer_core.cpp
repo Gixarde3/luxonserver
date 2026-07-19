@@ -1134,6 +1134,10 @@ bool EnetPeer::service() {
         for (const auto& channel : channels_) {
             const auto measure_sliding_flat_map = [](const auto& buffer) {
                 size_t fres = 0;
+
+                if (buffer.empty())
+                    return fres;
+
                 for (std::size_t i = 0; i < buffer.capacity(); ++i) {
                     auto key = buffer.base_key() + i;
                     if (auto *entry = buffer.find_value(key)) {
@@ -1141,14 +1145,17 @@ bool EnetPeer::service() {
                         fres += entry->second.get_payload_size();
                     }
                 }
+
                 return fres;
             };
             const auto measure_deque = [](const std::deque<EnetCommand>& buffer) {
                 size_t fres = 0;
+
                 for (const auto& entry : buffer) {
                     fres += sizeof(EnetCommandHeader);
                     fres += entry.get_payload_size();
                 }
+
                 return fres;
             };
             footprint += measure_sliding_flat_map(channel->incoming_reliable);
