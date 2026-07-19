@@ -78,7 +78,7 @@ static void cpp_config_from_c(luxon::enet::EnetPeerConfig& cpp_cfg, const luxon_
     cpp_cfg.max_resends = c_cfg->max_resends;
     cpp_cfg.fast_resend_count = c_cfg->fast_resend_count;
     cpp_cfg.max_pending_unreliable_commands = c_cfg->max_pending_unreliable_commands;
-    cpp_cfg.max_payload_size = c_cfg->max_payload_size;
+    cpp_cfg.max_incoming_buffer_size = c_cfg->max_payload_size;
     cpp_cfg.max_messages_per_second = c_cfg->max_messages_per_second;
     cpp_cfg.max_dispatches_per_tick = c_cfg->max_dispatches_per_tick;
 }
@@ -99,7 +99,7 @@ void luxon_enet_peer_config_init_default(luxon_enet_peer_config_t *config) {
     config->max_resends = def.max_resends;
     config->fast_resend_count = def.fast_resend_count;
     config->max_pending_unreliable_commands = def.max_pending_unreliable_commands;
-    config->max_payload_size = def.max_payload_size;
+    config->max_payload_size = def.max_incoming_buffer_size;
     config->max_messages_per_second = def.max_messages_per_second;
     config->max_dispatches_per_tick = def.max_dispatches_per_tick;
 }

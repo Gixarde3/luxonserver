@@ -13,6 +13,7 @@
 #include <vector>
 #include <array>
 #include <queue>
+#include <deque>
 #include <unordered_map>
 #include <set>
 #include <deque>
@@ -67,7 +68,7 @@ struct EnetPeerConfig {
     int max_pending_unreliable_commands = 0;
 
     // Hard rate/size limits
-    size_t max_payload_size = 500 * 1024;
+    size_t max_incoming_buffer_size = 500 * 1024;
     uint32_t max_messages_per_second = 500;
     uint8_t max_dispatches_per_tick = 16;
 
@@ -181,7 +182,7 @@ public:
     // incoming storage
     sliding_flat_map<uint32_t, EnetCommand, 128> incoming_reliable;           // by reliable_seq
     sliding_flat_map<uint32_t, EnetCommand, 256> incoming_unreliable;         // by unreliable_seq
-    std::queue<EnetCommand> incoming_unsequenced;                             // ready to dispatch (also reassembled frags)
+    std::deque<EnetCommand> incoming_unsequenced;                             // ready to dispatch (also reassembled frags)
     sliding_flat_map<uint32_t, EnetCommand, 64> incoming_unsequenced_frags;   // reliable_seq -> fragment cmd for unsequenced fragments
 
     // seq numbers

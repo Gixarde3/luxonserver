@@ -196,7 +196,7 @@ bool EnetPeer::send_payload(DatagramView payload, const EnetSendOptions& opt) {
         return false;
 
     // Enforce max message size limit
-    if (payload.size() > cfg_.max_payload_size) {
+    if (payload.size() > cfg_.max_incoming_buffer_size) {
         if (on_log_message)
             on_log_message(LogLevel::Error, "Payload size exceeds limit");
         return false;
@@ -431,10 +431,10 @@ std::optional<EnetOutCommand> EnetPeer::remove_sent_reliable(uint32_t ack_seq, u
 
 void EnetPeer::handle_fragment(const EnetCommand& fragment_cmd) {
     // Enforce size limit on incoming assemblies
-    if (fragment_cmd.fragment_total_length > cfg_.max_payload_size) {
+    if (fragment_cmd.fragment_total_length > cfg_.max_incoming_buffer_size) {
         ENET_METRIC_ADD(enet.reliable_commands_in_dropped, 1);
         if (on_log_message)
-            on_log_message(LogLevel::Error, "Incoming fragmented payload exceeds size limit, Disconnecting!");
+            on_log_message(LogLevel::Error, "Incoming fragmented payload exceeds size limit, disconnecting!");
 
         disconnect(true);
         return;
@@ -483,7 +483,7 @@ void EnetPeer::handle_fragment(const EnetCommand& fragment_cmd) {
     } else {
         combined.header.command_type = EnetCommandType::EgSendReliableUnsequenced;
         combined.header.flags = FlagValue::ReliableUnsequenced;
-        ch.incoming_unsequenced.push(std::move(combined));
+        ch.incoming_unsequenced.push_back(std::move(combined));
     }
 }
 
@@ -552,7 +552,7 @@ bool EnetPeer::queue_incoming_command(const EnetCommand& cmd) {
                 return false;
         }
         unsequenced_window_[idx / 32] |= (1u << (idx % 32));
-        ch.incoming_unsequenced.push(cmd);
+        ch.incoming_unsequenced.push_back(cmd);
         return true;
     }
 
@@ -758,7 +758,7 @@ bool EnetPeer::dispatch_one() {
             if (on_payload_command)
                 on_payload_command(std::move(cmd));
 
-            ch.incoming_unsequenced.pop();
+            ch.incoming_unsequenced.pop_front();
             return true;
         }
 
@@ -1124,8 +1124,44 @@ bool EnetPeer::service() {
 
     // Limited number of dispatches
     int dispatch_limit = cfg_.max_dispatches_per_tick;
+    unsigned dispatches = 0;
     while (dispatch_limit-- > 0 && dispatch_one())
-        ;
+        ++dispatches;
+
+    // Limit incoming buffer memory footprint
+    if (dispatches > 2) {
+        size_t footprint = 0;
+        for (const auto& channel : channels_) {
+            const auto measure_sliding_flat_map = [](const auto& buffer) {
+                size_t fres = 0;
+                for (std::size_t i = 0; i < buffer.capacity(); ++i) {
+                    auto key = buffer.base_key() + i;
+                    if (auto *entry = buffer.find_value(key)) {
+                        fres += sizeof(EnetCommandHeader);
+                        fres += entry->second.get_payload_size();
+                    }
+                }
+                return fres;
+            };
+            const auto measure_deque = [](const std::deque<EnetCommand>& buffer) {
+                size_t fres = 0;
+                for (const auto& entry : buffer) {
+                    fres += sizeof(EnetCommandHeader);
+                    fres += entry.get_payload_size();
+                }
+                return fres;
+            };
+            footprint += measure_sliding_flat_map(channel->incoming_reliable);
+            footprint += measure_sliding_flat_map(channel->incoming_unreliable);
+            footprint += measure_deque(channel->incoming_unsequenced);
+            footprint += measure_sliding_flat_map(channel->incoming_unsequenced_frags);
+        }
+        if (footprint >= cfg_.max_incoming_buffer_size) {
+            if (on_log_message)
+                on_log_message(LogLevel::Error, "Peer exceeded maximum buffer memory footprint, disconnecting!");
+            disconnect(true);
+        }
+    }
 
     // Send generated outgoing commands
     return send_outgoing_commands();

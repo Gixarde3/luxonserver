@@ -45,7 +45,7 @@ bool EnetChannel::queue_incoming_reliable_unsequenced(const EnetCommand& cmd) {
         if (res.out_of_window())
             return false;
     } else {
-        incoming_unsequenced.push(cmd);
+        incoming_unsequenced.push_back(cmd);
     }
 
     sync_reliable_unsequenced_fragment_window();
