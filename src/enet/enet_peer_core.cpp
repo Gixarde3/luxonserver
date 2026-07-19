@@ -483,7 +483,7 @@ void EnetPeer::handle_fragment(const EnetCommand& fragment_cmd) {
     } else {
         combined.header.command_type = EnetCommandType::EgSendReliableUnsequenced;
         combined.header.flags = FlagValue::ReliableUnsequenced;
-        ch.incoming_unsequenced.push_back(std::move(combined));
+        ch.incoming_unsequenced.push(std::move(combined));
     }
 }
 
@@ -552,7 +552,7 @@ bool EnetPeer::queue_incoming_command(const EnetCommand& cmd) {
                 return false;
         }
         unsequenced_window_[idx / 32] |= (1u << (idx % 32));
-        ch.incoming_unsequenced.push_back(cmd);
+        ch.incoming_unsequenced.push(std::move(cmd));
         return true;
     }
 
@@ -706,8 +706,20 @@ void EnetPeer::handle_incoming_datagram(std::span<const uint8_t> datagram, bool 
 }
 
 void EnetPeer::handle_incoming_packet(const EnetPacketHeader& hdr, std::span<EnetCommand> cmds, size_t datagram_size) {
+    if (state_ == EnetConnectionState::Disconnected)
+        return;
+
     try {
         bytes_in_ += datagram_size;
+        bytes_in_since_service_ += datagram_size;
+
+        // Limit incoming buffer memory footprint
+        if (bytes_in_since_service_ >= cfg_.max_incoming_buffer_size) {
+            if (on_log_message)
+                on_log_message(LogLevel::Error, "Peer exceeded maximum buffer memory footprint, disconnecting!");
+            disconnect(true);
+            return;
+        }
 
         // Challenge check (plain or encrypted)
         if (hdr.challenge != challenge_) {
@@ -758,15 +770,14 @@ bool EnetPeer::dispatch_one() {
             if (on_payload_command)
                 on_payload_command(std::move(cmd));
 
-            ch.incoming_unsequenced.pop_front();
+            ch.incoming_unsequenced.pop();
             return true;
         }
 
         if (!ch.incoming_unreliable.empty()) {
             ch.sync_unreliable_window();
 
-            // Prune excess packets by removing the smallest present key,
-            // not merely base_ if that slot happens to be occupied.
+            // Prune excess packets by removing smallest present key
             if (cfg_.max_pending_unreliable_commands > 0) {
                 while ((int)ch.incoming_unreliable.size() > cfg_.max_pending_unreliable_commands) {
                     bool removed = false;
@@ -1122,54 +1133,13 @@ bool EnetPeer::service() {
     if (state_ == EnetConnectionState::Disconnected)
         return true;
 
+    // Reset incoming bytes since last service call
+    bytes_in_since_service_ = 0;
+
     // Limited number of dispatches
     int dispatch_limit = cfg_.max_dispatches_per_tick;
-    unsigned dispatches = 0;
     while (dispatch_limit-- > 0 && dispatch_one())
-        ++dispatches;
-
-    // Limit incoming buffer memory footprint
-    if (dispatches > 2) {
-        size_t footprint = 0;
-        for (const auto& channel : channels_) {
-            const auto measure_sliding_flat_map = [](const auto& buffer) {
-                size_t fres = 0;
-
-                if (buffer.empty())
-                    return fres;
-
-                for (std::size_t i = 0; i < buffer.capacity(); ++i) {
-                    auto key = buffer.base_key() + i;
-                    if (auto *entry = buffer.find_value(key)) {
-                        fres += sizeof(EnetCommandHeader);
-                        fres += entry->second.get_payload_size();
-                    }
-                }
-
-                return fres;
-            };
-            const auto measure_deque = [](const std::deque<EnetCommand>& buffer) {
-                size_t fres = 0;
-
-                for (const auto& entry : buffer) {
-                    fres += sizeof(EnetCommandHeader);
-                    fres += entry.get_payload_size();
-                }
-
-                return fres;
-            };
-            footprint += measure_sliding_flat_map(channel->incoming_reliable);
-            footprint += measure_sliding_flat_map(channel->incoming_unreliable);
-            footprint += measure_deque(channel->incoming_unsequenced);
-            footprint += measure_sliding_flat_map(channel->incoming_unsequenced_frags);
-        }
-        if (footprint >= cfg_.max_incoming_buffer_size) {
-            if (on_log_message)
-                on_log_message(LogLevel::Error, "Peer exceeded maximum buffer memory footprint, disconnecting!");
-            disconnect(true);
-            return true;
-        }
-    }
+        ;
 
     // Send generated outgoing commands
     return send_outgoing_commands();

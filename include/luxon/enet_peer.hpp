@@ -182,7 +182,7 @@ public:
     // incoming storage
     sliding_flat_map<uint32_t, EnetCommand, 128> incoming_reliable;           // by reliable_seq
     sliding_flat_map<uint32_t, EnetCommand, 256> incoming_unreliable;         // by unreliable_seq
-    std::deque<EnetCommand> incoming_unsequenced;                             // ready to dispatch (also reassembled frags)
+    std::queue<EnetCommand> incoming_unsequenced;                             // ready to dispatch (also reassembled frags)
     sliding_flat_map<uint32_t, EnetCommand, 64> incoming_unsequenced_frags;   // reliable_seq -> fragment cmd for unsequenced fragments
 
     // seq numbers
@@ -357,6 +357,7 @@ private:
     // Bytes
     uint64_t bytes_out_ = 0;
     uint64_t bytes_in_ = 0;
+    uint32_t bytes_in_since_service_ = 0;
 
     // outgoing buffers/queues
     uint8_t outgoing_command_count_ = 0;
