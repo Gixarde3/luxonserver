@@ -1167,6 +1167,7 @@ bool EnetPeer::service() {
             if (on_log_message)
                 on_log_message(LogLevel::Error, "Peer exceeded maximum buffer memory footprint, disconnecting!");
             disconnect(true);
+            return true;
         }
     }
 
