@@ -126,7 +126,7 @@ bool EnetEndpoint::operator<(const EnetEndpoint& o) const {
 }
 
 std::string EnetEndpoint::get_ip() const {
-    char ip_str[64] = {0}; // Safe buffer for INET6_ADDRSTRLEN
+    char ip_str[64] = {0};
 
     if (addr.ss_family == AF_INET) {
         const sockaddr_in *sin = reinterpret_cast<const sockaddr_in *>(&addr);
@@ -137,6 +137,8 @@ std::string EnetEndpoint::get_ip() const {
     else if (addr.ss_family == AF_INET6) {
         const sockaddr_in6 *sin6 = reinterpret_cast<const sockaddr_in6 *>(&addr);
         inet_ntop(AF_INET6, &sin6->sin6_addr, ip_str, sizeof(ip_str));
+        if (std::string_view(ip_str).starts_with("::ffff:"))
+            return ip_str + 7;
         return ip_str;
     }
 #endif
@@ -167,12 +169,15 @@ std::string EnetEndpoint::to_string() const {
     )
         return "<endpoint>";
 
+    const std::string ip = get_ip();
+    uint16_t port = get_port();
+
 #ifdef HAS_SOCKADDR_IN6
-    if (addr.ss_family == AF_INET6)
-        return std::format("[{}]:{}", get_ip(), get_port());
+    if (addr.ss_family == AF_INET6 && ip.find(':') != std::string::npos)
+        return std::format("[{}]:{}", ip, port);
 #endif
 
-    return std::format("{}:{}", get_ip(), get_port());
+    return std::format("{}:{}", ip, port);
 }
 
 std::size_t EnetEndpointHash::operator()(const EnetEndpoint& ep) const noexcept {
