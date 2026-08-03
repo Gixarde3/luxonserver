@@ -1737,7 +1737,7 @@ std::expected<Message, Error> GpBinaryV18::Deserialize(std::span<const uint8_t> 
     }
 
     case Kind::InitResponse: {
-        r.read_u8(); // discarded
+        (void)r.read_u8(); // discarded
         if (r.remaining() != 0)
             return err(Error::Code::InvalidValue, "InitResponse packet has trailing bytes");
         return Message(InitResponseMessage{}, encrypted);
