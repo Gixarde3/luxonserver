@@ -190,10 +190,10 @@ static bool messages_equal_deep(const Message& a, const Message& b) {
     if (a.index() != b.index())
         return false;
 
-    return std::visit(
+    return a.visit(
         [&](const auto& ma) -> bool {
             using T = std::decay_t<decltype(ma)>;
-            const auto& mb = std::get<T>(b);
+            const auto& mb = b.get<T>();
 
             if constexpr (std::is_same_v<T, InitMessage>) {
                 return ma.protocol_major == mb.protocol_major && ma.protocol_minor == mb.protocol_minor && ma.client_sdk_id == mb.client_sdk_id &&
@@ -222,8 +222,7 @@ static bool messages_equal_deep(const Message& a, const Message& b) {
             } else {
                 static_assert(!sizeof(T *), "Unhandled Message alternative");
             }
-        },
-        a);
+        });
 }
 
 static void roundtrip(GpBinaryV18& p, const Message& msg) {
@@ -581,8 +580,8 @@ int main() {
                          auto decoded_req = server.Deserialize(std::span<const uint8_t>(init_req_bytes->data(), init_req_bytes->size()));
                          require_expected(decoded_req, "Server Deserialize init enc request");
 
-                         REQUIRE(std::holds_alternative<InternalOperationRequestMessage>(*decoded_req));
-                         auto req_msg = std::get<InternalOperationRequestMessage>(*decoded_req);
+                         REQUIRE(decoded_req->holds_alternative<InternalOperationRequestMessage>());
+                         auto req_msg = decoded_req->get<InternalOperationRequestMessage>();
 
                          // Server handles it -> response message
                          auto response_msg = server.HandleInitEncryptionRequest(req_msg);
@@ -595,8 +594,8 @@ int main() {
                          auto decoded_resp = client.Deserialize(std::span<const uint8_t>(resp_bytes->data(), resp_bytes->size()));
                          require_expected(decoded_resp, "Client Deserialize init enc response");
 
-                         REQUIRE(std::holds_alternative<InternalOperationResponseMessage>(*decoded_resp));
-                         auto resp_msg2 = std::get<InternalOperationResponseMessage>(*decoded_resp);
+                         REQUIRE(decoded_resp->holds_alternative<InternalOperationResponseMessage>());
+                         auto resp_msg2 = decoded_resp->get<InternalOperationResponseMessage>();
 
                          auto ok = client.HandleInitEncryptionResponse(resp_msg2);
                          require_expected(ok, "HandleInitEncryptionResponse");
