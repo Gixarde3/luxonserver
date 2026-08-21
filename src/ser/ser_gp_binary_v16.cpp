@@ -597,8 +597,20 @@ std::expected<Value, Error> GpBinaryV16::decode_value_payload(ByteReader& r, uin
             }
             return Value(std::move(out));
         }
-        default:
-            return std::unexpected(Error{.code = Error::Code::UnsupportedTypeCode, .message = "unsupported generic array element type"});
+        default: {
+            ObjectArray out;
+            out.reserve(n);
+
+            for (uint32_t i = 0; i < n; ++i) {
+                auto v = decode_value_payload(r, elem_tc, depth + 1);
+                if (!v)
+                    return std::unexpected(v.error());
+
+                out.push_back(std::move(*v));
+            }
+
+            return Value(std::move(out));
+        }
         }
     }
     case TC16_Dictionary: {
