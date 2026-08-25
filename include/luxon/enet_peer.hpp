@@ -69,7 +69,7 @@ struct EnetPeerConfig {
 
     // Hard rate/size limits
     size_t max_incoming_buffer_size = 500 * 1024;
-    uint32_t max_messages_per_second = 500;
+    uint32_t max_messages_per_second = 1500;
     uint8_t max_dispatches_per_tick = 16;
 
     // Parse incoming connect command and extract configuration
