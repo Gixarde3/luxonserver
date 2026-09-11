@@ -142,28 +142,25 @@ Awaitable<> GameServerHandler::HandleOperationRequest(ser::OperationRequestMessa
 
             // Set current game
             auto& pp = *peer_->persistent;
-            auto expected_game = server_manager_.get_game(pp.get_invitation());
-            pp.reset_game(); // Effectively expire peer's game invitation and memory ownership
-            if (expected_game) {
-                if (server_manager_.is_game_external(**expected_game)) {
-                    peer_->log->error("Peer tried to join an external game! Forcing disconnect.");
-                    const ser::OperationResponseMessage resp{.operation_code = req.operation_code,
-                                                             .return_code = ErrorCodes::Matchmaking::ServerForbidden,
-                                                             .debug_message = "Not invited to server"};
-                    send(proto_->Serialize(resp), enet::EnetSendOptions{.channel = cmd_header.channel_id});
-                    peer_->disconnect();
-                    lco_return;
-                } else {
-                    current_game_ = std::move(*expected_game);
+            if (pp.has_invitation()) {
+                auto expected_game = server_manager_.get_game(pp.get_invitation());
+                if (expected_game) {
+                    if (server_manager_.is_game_external(**expected_game)) {
+                        peer_->log->error("Peer tried to join an external game! Forcing disconnect.");
+                        const ser::OperationResponseMessage resp{.operation_code = req.operation_code,
+                                                                 .return_code = ErrorCodes::Matchmaking::ServerForbidden,
+                                                                 .debug_message = "Not invited to server"};
+                        send(proto_->Serialize(resp, is_encrypted), enet::EnetSendOptions{.channel = cmd_header.channel_id});
+                        peer_->disconnect();
+                        lco_return;
+                    } else {
+                        current_game_ = std::move(*expected_game);
+                    }
                 }
-            } else {
-                peer_->log->error("Persistent peer doesn't have valid game assigned! Forcing disconnect.");
-                const ser::OperationResponseMessage resp{.operation_code = req.operation_code,
-                                                         .return_code = ErrorCodes::Matchmaking::ServerForbidden,
-                                                         .debug_message = "Not invited to any game server"};
-                send(proto_->Serialize(resp), enet::EnetSendOptions{.channel = cmd_header.channel_id});
-                peer_->disconnect();
-                lco_return;
+            }
+            if (!current_game_) {
+                peer_->log->info("Persistent peer has no valid invitation, enabling unsolicited join/create.");
+                allow_unsolicited_ = true;
             }
 
             lco_return;
@@ -474,7 +471,7 @@ Awaitable<> GameServerHandler::HandleOperationRequest(ser::OperationRequestMessa
             if (broadcast_actor_props)
                 resp.parameters[DictKeyCodes::Properties::ActorProperties] = &all_actor_props;
 
-            send(proto_->Serialize(resp));
+            send(proto_->Serialize(resp, is_encrypted));
 
             // Broadcast Join Event
             if (!(game->flags & GameFlags::SuppressRoomEvents)) {
@@ -503,14 +500,14 @@ Awaitable<> GameServerHandler::HandleOperationRequest(ser::OperationRequestMessa
 
                 if (res == Result::Fail) {
                     const ser::OperationResponseMessage resp{.operation_code = OpCodes::Lite::Leave, .return_code = ErrorCodes::Matchmaking::PluginReportedError};
-                    send(proto_->Serialize(resp));
+                    send(proto_->Serialize(resp, is_encrypted));
                     lco_return;
                 }
             });
 
             // Send success response
             const ser::OperationResponseMessage resp{.operation_code = OpCodes::Lite::Leave, .return_code = ErrorCodes::Core::Ok};
-            send(proto_->Serialize(resp));
+            send(proto_->Serialize(resp, is_encrypted));
 
             // Disconnect, handler will do the rest
             has_left_ = true;
@@ -527,7 +524,7 @@ Awaitable<> GameServerHandler::HandleOperationRequest(ser::OperationRequestMessa
 
             const auto params = models::SetProperties::decode(req);
             if (!params) {
-                send(proto_->Serialize(params.error()));
+                send(proto_->Serialize(params.error(), is_encrypted));
                 lco_return;
             }
 
@@ -546,7 +543,7 @@ Awaitable<> GameServerHandler::HandleOperationRequest(ser::OperationRequestMessa
                 if (res == Result::Fail) {
                     const ser::OperationResponseMessage resp{.operation_code = OpCodes::Lite::SetProperties,
                                                          .return_code = ErrorCodes::Matchmaking::PluginReportedError};
-                    send(proto_->Serialize(resp));
+                    send(proto_->Serialize(resp, is_encrypted));
                     lco_return;
                 }
 
@@ -572,7 +569,7 @@ Awaitable<> GameServerHandler::HandleOperationRequest(ser::OperationRequestMessa
             ser::OperationResponseMessage resp;
             resp.operation_code = OpCodes::Lite::SetProperties;
             resp.return_code = ok ? ErrorCodes::Core::Ok : ErrorCodes::Core::OperationInvalid;
-            send(proto_->Serialize(resp));
+            send(proto_->Serialize(resp, is_encrypted));
 
             // Broadcast property updates
             if (ok && broadcast) {
@@ -627,7 +624,7 @@ Awaitable<> GameServerHandler::HandleOperationRequest(ser::OperationRequestMessa
         if (req.operation_code == OpCodes::Matchmaking::JoinGame || req.operation_code == OpCodes::Matchmaking::CreateGame) {
             const auto params = models::JoinOrCreateGame::decode(req);
             if (!params) {
-                send(proto_->Serialize(params.error()));
+                send(proto_->Serialize(params.error(), is_encrypted));
                 lco_return;
             }
 
@@ -639,26 +636,20 @@ Awaitable<> GameServerHandler::HandleOperationRequest(ser::OperationRequestMessa
             std::shared_ptr<Game> target_game;
             if (auto game_res = app_games.find(game_id); game_res != app_games.end()) {
                 target_game = game_res->second.lock();
-            } else {
-                bool should_create = (req.operation_code == OpCodes::Matchmaking::CreateGame) || params->get<DictKeyCodes::AuthAndLobby::CreateIfNotExists>();
-
-                if (should_create) {
-                    auto new_game = app.get_lobby()->create_game(std::string(game_id), "", true);
-                    if (!new_game) {
-                        send(proto_->Serialize(new_game.error()));
-                        lco_return;
-                    }
-                    target_game = *new_game;
-                } else {
-                    const ser::OperationResponseMessage resp{
-                        .operation_code = req.operation_code, .return_code = ErrorCodes::Matchmaking::GameIdNotExists, .debug_message = "Game does not exist"};
-                    send(proto_->Serialize(resp));
+            }
+            if (!target_game) {
+                auto new_game = app.get_lobby()->create_game(std::string(game_id), "", true);
+                if (!new_game) {
+                    send(proto_->Serialize(new_game.error(), is_encrypted));
                     lco_return;
                 }
+                target_game = *new_game;
+                target_game->empty_game_ttl = 60000;
             }
 
             // Set as current game and disallow unsolicited join to prevent infinite recursion
-            peer_->persistent->invite(std::move(target_game), req.operation_code == OpCodes::Matchmaking::CreateGame);
+            current_game_ = target_game;
+            peer_->persistent->invite(target_game, req.operation_code == OpCodes::Matchmaking::CreateGame);
             allow_unsolicited_ = false;
 
             // Now that invitation is populated it will execute main logic block

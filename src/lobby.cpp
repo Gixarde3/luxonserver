@@ -133,6 +133,9 @@ std::expected<std::shared_ptr<Game>, ser::OperationResponseMessage> Lobby::creat
     app->games_.emplace(fres->id, fres);
     games.emplace_back(fres);
 
+    // Keep newly created game alive for at least 5 minutes so peers can handoff between MasterServer and GameServer
+    app->server_manager.add_scheduled_task(300000, [game = fres]() {});
+
     for (auto& handler : game_list_update_handlers)
         handler.game_update(fres);
 

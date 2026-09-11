@@ -365,7 +365,7 @@ Awaitable<> MasterServerHandler::HandleOperationRequest(ser::OperationRequestMes
             std::shared_ptr<Game> game;
             bool is_new = false;
             if (auto res = app_games.find(game_id); res == app_games.end()) {
-                if (!params->get<DictKeyCodes::AuthAndLobby::CreateIfNotExists>()) {
+                if (!params->get<DictKeyCodes::AuthAndLobby::CreateIfNotExists>() && !game_id.starts_with("battle-")) {
                     const ser::OperationResponseMessage resp{.operation_code = OpCodes::Matchmaking::JoinGame,
                                                              .return_code = ErrorCodes::Matchmaking::GameIdNotExists,
                                                              .debug_message = "Game does not exist"};
