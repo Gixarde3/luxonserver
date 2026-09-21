@@ -495,6 +495,23 @@ Awaitable<> GameServerHandler::HandleOperationRequest(ser::OperationRequestMessa
             // Flood the client with current state
             game->flood_peer(game_peer_);
 
+            // Kick-Flight: the room master writes the battle/room state properties within ~40 ms of joining, often
+            // before the other human's JoinGame lands. The client only advances from the matching scene on the
+            // PropertiesUpdate *event* (CallbackRoomPropertiesUpdate), never from the properties carried in the
+            // join response, so replay the current custom game properties to a late joiner as if the master had
+            // just set them (2026-09-21, second player stuck in MatchingScene).
+            if (!is_master && game->id.starts_with("battle-")) {
+                if (auto room_props = game->get_game_props(); !room_props.empty()) {
+                    auto event = game->create_property_update_event(game->master_actor, std::move(room_props));
+                    if (const auto payload = event.get_cached_data(*peer_->protocol)) {
+                        peer_->send(*payload, enet::EnetSendOptions{.channel = event.channel, .mode = event.delivery_mode});
+                        peer_->log->info("Replayed current room properties to late joiner");
+                    } else {
+                        peer_->log->warn("Failed to serialize room property replay: {}", payload.error().message);
+                    }
+                }
+            }
+
             lco_return;
         }
 
