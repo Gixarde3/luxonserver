@@ -933,7 +933,7 @@ void ServerManager::setup() {
     enet::EnetPeerConfig cfg;
     cfg.time_base = enet::EnetPeer::create_time_base();
     cfg.time_ping_interval_ms = 1000;
-    cfg.disconnect_timeout_ms = 5000;
+    cfg.disconnect_timeout_ms = 30000; // ENet default (was 5000: a 5 s unacked reliable command expelled live clients)
 
     // Create servers
     for (const auto& config : configs_) {
