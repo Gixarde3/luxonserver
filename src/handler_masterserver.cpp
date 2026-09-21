@@ -404,7 +404,14 @@ Awaitable<> MasterServerHandler::HandleOperationRequest(ser::OperationRequestMes
             // Validate join
             if (!is_new) {
                 const auto [join_validation_code, join_validation_message] = game->validate_join(peer_->persistent->user_id);
-                if (join_validation_code != ErrorCodes::Core::Ok) {
+                // Kick-Flight: both humans of a battle are told the room id at the same time (Stage 3), so the second
+                // one usually asks for it before the first has landed on the GameServer and `is_created` is still
+                // false. That is not a missing room, only a pending one: let the peer through, the GameServer
+                // handler creates/joins on arrival either way (2026-09-21, "Title Disconnect Error" on player 2).
+                const bool pending_battle = join_validation_code == ErrorCodes::Matchmaking::GameIdNotExists && !game->is_created && game_id.starts_with("battle-");
+                if (pending_battle)
+                    peer_->log->info("Game {} is pending creation, allowing join", game_id);
+                if (join_validation_code != ErrorCodes::Core::Ok && !pending_battle) {
                     const ser::OperationResponseMessage resp{.operation_code = OpCodes::Matchmaking::JoinGame,
                                                              .return_code = join_validation_code,
                                                              .debug_message = std::string(join_validation_message)};
