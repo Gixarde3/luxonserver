@@ -347,6 +347,9 @@ Awaitable<> GameServerHandler::HandleOperationRequest(ser::OperationRequestMessa
                 // Verify join if joining existing room
                 const auto [join_validation_code, join_validation_message] = game->validate_join(peer_->persistent->user_id);
                 if (join_validation_code != ErrorCodes::Core::Ok) {
+                    peer_->log->warn("Join of game {} rejected: {} ({}); created={} open={} peers={} expected={} max_peers={} flags={:#x}",
+                                     game->id, join_validation_message, join_validation_code, game->is_created, game->is_open,
+                                     game->peers.size(), game->expected_users.size(), game->max_peers, game->flags);
                     const ser::OperationResponseMessage resp{.operation_code = OpCodes::Matchmaking::JoinGame,
                                                              .return_code = join_validation_code,
                                                              .debug_message = std::string(join_validation_message)};

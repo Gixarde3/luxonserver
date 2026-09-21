@@ -411,6 +411,10 @@ Awaitable<> MasterServerHandler::HandleOperationRequest(ser::OperationRequestMes
                 const bool pending_battle = join_validation_code == ErrorCodes::Matchmaking::GameIdNotExists && !game->is_created && game_id.starts_with("battle-");
                 if (pending_battle)
                     peer_->log->info("Game {} is pending creation, allowing join", game_id);
+                if (join_validation_code != ErrorCodes::Core::Ok && !pending_battle)
+                    peer_->log->warn("Join of game {} rejected: {} ({}); created={} open={} peers={} expected={} max_peers={}",
+                                     game_id, join_validation_message, join_validation_code, game->is_created, game->is_open,
+                                     game->peers.size(), game->expected_users.size(), game->max_peers);
                 if (join_validation_code != ErrorCodes::Core::Ok && !pending_battle) {
                     const ser::OperationResponseMessage resp{.operation_code = OpCodes::Matchmaking::JoinGame,
                                                              .return_code = join_validation_code,
