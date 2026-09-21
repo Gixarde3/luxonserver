@@ -94,6 +94,11 @@ Awaitable<> GameServerHandler::HandleDisconnect() {
 Awaitable<> GameServerHandler::HandleOperationRequest(ser::OperationRequestMessage&& req, bool is_encrypted, const enet::EnetCommandHeader& cmd_header) {
     ZoneScoped;
 
+    // Kick-Flight debugging (2026-09-21): trace what each game peer sends so a client that stalls during loading can be
+    // told apart from one that left on purpose. RaiseEvent is the hot path (position sync), so it is not logged.
+    if (req.operation_code != OpCodes::Lite::RaiseEvent)
+        peer_->log->info("op {} on channel {} ({} params)", static_cast<int>(req.operation_code), cmd_header.channel_id, req.parameters.size());
+
     const auto ensure_is_master = [&]() {
         const bool is_master = game_peer_ && game_peer_->actor_id == current_game_->master_actor || current_game_->peers.size() == 0;
         if (!is_master) {
