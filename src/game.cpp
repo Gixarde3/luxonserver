@@ -335,7 +335,11 @@ std::pair<int16_t, std::string_view> Game::validate_join(const std::string& user
         return {ErrorCodes::Matchmaking::GameIdNotExists, "Game does not exist"};
 
     // Return error if game is closed
-    if (!is_open)
+    // Kick-Flight: the room master closes the room (IsOpen=false) within ~100 ms of creating it, before the other
+    // human has reached the GameServer, so whichever player is slower got "Game is closed" (2026-09-21). Everyone
+    // who belongs to a battle room was invited through the MasterServer and is on expected_users: keep the
+    // reserved slot valid for them even when the room is already closed.
+    if (!is_open && !(id.starts_with("battle-") && expected_users.contains(user_id)))
         return {ErrorCodes::Matchmaking::GameClosed, "Game is closed"};
 
     // Check capacity (peers + expected users)
