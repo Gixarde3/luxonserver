@@ -169,6 +169,16 @@ GamePeer *Game::add_peer(GamePeer&& game_peer) {
     // Add peer to list
     auto& fres = peers.emplace_back(game_peer);
 
+    // master_actor is only ever reassigned in remove_peer(), and only while somebody else is still
+    // in the room.  A game outlives its peers (it stays in the lobby for empty_game_ttl), so a peer
+    // joining a game that emptied keeps finding master_actor pointing at the actor that left.  It is
+    // told as much through the MasterClientId game property, and its client-side reconnect state
+    // machine then waits forever for a master that no longer exists -- the reconnecting player is
+    // dropped instead of resumed.  Hand mastership to the joiner whenever the current holder is not
+    // around anymore; same rule remove_peer() applies when the room is not empty.
+    if (!find_peer(master_actor))
+        master_actor = fres.actor_id;
+
     // Remove user from expected users
     expected_users.erase(peer->persistent->user_id);
 
