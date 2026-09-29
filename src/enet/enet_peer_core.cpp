@@ -429,7 +429,7 @@ std::optional<EnetOutCommand> EnetPeer::remove_sent_reliable(uint32_t ack_seq, u
     return std::nullopt;
 }
 
-void EnetPeer::handle_fragment(const EnetCommand& fragment_cmd) {
+bool EnetPeer::handle_fragment(const EnetCommand& fragment_cmd) {
     // Enforce size limit on incoming assemblies
     if (fragment_cmd.fragment_total_length > cfg_.max_incoming_buffer_size) {
         ENET_METRIC_ADD(enet.reliable_commands_in_dropped, 1);
@@ -437,7 +437,7 @@ void EnetPeer::handle_fragment(const EnetCommand& fragment_cmd) {
             on_log_message(LogLevel::Error, "Incoming fragmented payload exceeds size limit, disconnecting!");
 
         disconnect(true);
-        return;
+        return true;
     }
 
     EnetChannel& ch = channel(fragment_cmd.header.channel_id);
@@ -445,12 +445,12 @@ void EnetPeer::handle_fragment(const EnetCommand& fragment_cmd) {
 
     EnetCommand start;
     if (!ch.try_get_fragment(fragment_cmd.fragment_start_seq, sequenced, start))
-        return;
+        return true;
 
     for (uint32_t s = fragment_cmd.fragment_start_seq; s < fragment_cmd.fragment_start_seq + fragment_cmd.fragment_count; ++s) {
         EnetCommand tmp;
         if (!ch.try_get_fragment(s, sequenced, tmp))
-            return;
+            return true;
     }
 
     ByteArray full(fragment_cmd.fragment_total_length, 0);
@@ -478,16 +478,20 @@ void EnetPeer::handle_fragment(const EnetCommand& fragment_cmd) {
             ENET_METRIC_ADD(enet.reliable_commands_in_dropped, 1);
             if (on_log_message)
                 on_log_message(LogLevel::Error, "Receive window `incoming_reliable` is too small! Dropping reliable packet!");
-            return;
+            return false;
         }
     } else {
         combined.header.command_type = EnetCommandType::EgSendReliableUnsequenced;
         combined.header.flags = FlagValue::ReliableUnsequenced;
         ch.incoming_unsequenced.push(std::move(combined));
     }
+    return true;
 }
 
-bool EnetPeer::queue_incoming_command(const EnetCommand& cmd) {
+bool EnetPeer::queue_incoming_command(const EnetCommand& cmd, bool* out_of_window) {
+    if (out_of_window)
+        *out_of_window = false;
+
     EnetChannel& ch = channel(cmd.header.channel_id);
 
     const bool reliable = (cmd.header.flags & FlagValue::Reliable) != 0;
@@ -507,12 +511,22 @@ bool EnetPeer::queue_incoming_command(const EnetCommand& cmd) {
 
         auto res = ch.incoming_reliable.emplace(cmd.header.reliable_seq, cmd);
         if (res.out_of_window()) {
+            if (out_of_window)
+                *out_of_window = true;
+            const int now = now_ms();
+            if (ch.reliable_window_stall_since_ms < 0)
+                ch.reliable_window_stall_since_ms = now;
+            ch.reliable_window_last_drop_ms = now;
             ENET_METRIC_ADD(enet.reliable_commands_in_dropped, 1);
             if (on_log_message)
                 on_log_message(LogLevel::Error, "Receive window `incoming_reliable` is too small! Dropping reliable packet!");
             return false;
         }
 
+        // Only a new in-window reliable command counts as progress. Duplicates
+        // return above and do not clear a stalled window.
+        ch.reliable_window_stall_since_ms = -1;
+        ch.reliable_window_last_drop_ms = -1;
         return true;
     }
 
@@ -559,7 +573,7 @@ bool EnetPeer::queue_incoming_command(const EnetCommand& cmd) {
     return false;
 }
 
-void EnetPeer::execute_command(const EnetCommand& cmd) {
+bool EnetPeer::execute_command(const EnetCommand& cmd) {
     ENET_METRIC_ADD(enet.commands_in, 1);
 
     // Rate limit check
@@ -574,8 +588,10 @@ void EnetPeer::execute_command(const EnetCommand& cmd) {
         if (on_log_message)
             on_log_message(LogLevel::Warning, "Peer exceeded message rate limit, disconnecting!");
         disconnect(true);
-        return;
+        return true;
     }
+
+    bool ack_eligible = true;
 
     // Execute command
     switch (cmd.header.command_type) {
@@ -637,8 +653,10 @@ void EnetPeer::execute_command(const EnetCommand& cmd) {
         ENET_METRIC_ADD(enet.reliable_commands_in, 1);
 
         if (state_ == EnetConnectionState::Connected) {
-            if (!queue_incoming_command(cmd))
+            bool out_of_window = false;
+            if (!queue_incoming_command(cmd, &out_of_window))
                 ENET_METRIC_ADD(enet.reliable_commands_in_dropped, 1);
+            ack_eligible = !out_of_window;
         }
         break;
     }
@@ -664,10 +682,12 @@ void EnetPeer::execute_command(const EnetCommand& cmd) {
                 break;
             }
 
-            if (queue_incoming_command(cmd)) {
-                handle_fragment(cmd);
+            bool out_of_window = false;
+            if (queue_incoming_command(cmd, &out_of_window)) {
+                ack_eligible = handle_fragment(cmd);
             } else {
                 ENET_METRIC_ADD(enet.reliable_commands_in_dropped, 1);
+                ack_eligible = !out_of_window;
             }
         }
         break;
@@ -677,6 +697,8 @@ void EnetPeer::execute_command(const EnetCommand& cmd) {
         // ignore
         break;
     }
+
+    return ack_eligible;
 }
 
 void EnetPeer::handle_incoming_datagram(std::span<const uint8_t> datagram, bool count_io_metrics) {
@@ -730,19 +752,20 @@ void EnetPeer::handle_incoming_packet(const EnetPacketHeader& hdr, std::span<Ene
         time_int_ = now_ms();
 
         for (const auto& c : cmds) {
-            // If reliable, enqueue ack immediately
+            // Acknowledge reliable commands only after accepting them. Duplicates
+            // remain ACKable, while an out-of-window rejection must be retried.
             const bool reliable = (c.header.flags & FlagValue::Reliable) != 0;
-            if (reliable)
-                queue_outgoing_ack(c, hdr.sent_time);
-
             // Execute ACK and VerifyConnect immediately
+            bool ack_eligible = true;
             if (c.header.command_type == EnetCommandType::Acknowledge || c.header.command_type == EnetCommandType::EgAcknowledgeUnsequenced ||
                 c.header.command_type == EnetCommandType::VerifyConnect) {
-                execute_command(c);
+                ack_eligible = execute_command(c);
             } else {
                 // Defer others to keep ordering consistent, we simply execute now and rely on channel ordering for dispatch
-                execute_command(c);
+                ack_eligible = execute_command(c);
             }
+            if (reliable && ack_eligible)
+                queue_outgoing_ack(c, hdr.sent_time);
         }
     } catch (const ProtocolError& e) {
         ENET_METRIC_ADD(enet.datagram_validation_failures, 1);
@@ -1132,6 +1155,28 @@ bool EnetPeer::send_acks_only() { return flush_send_queue(true); }
 bool EnetPeer::service() {
     if (state_ == EnetConnectionState::Disconnected)
         return true;
+
+    const int now = now_ms();
+    if (cfg_.incoming_reliable_stall_timeout_ms > 0) {
+        for (const auto& ch : channels_) {
+            if (ch->reliable_window_stall_since_ms < 0)
+                continue;
+
+            if (cfg_.incoming_reliable_stall_quiet_ms > 0 &&
+                now - ch->reliable_window_last_drop_ms > cfg_.incoming_reliable_stall_quiet_ms) {
+                ch->reliable_window_stall_since_ms = -1;
+                ch->reliable_window_last_drop_ms = -1;
+                continue;
+            }
+
+            if (now - ch->reliable_window_stall_since_ms >= cfg_.incoming_reliable_stall_timeout_ms) {
+                if (on_log_message)
+                    on_log_message(LogLevel::Error, "Reliable receive window made no progress after repeated out-of-window drops; disconnecting peer");
+                disconnect();
+                return true;
+            }
+        }
+    }
 
     // Reset incoming bytes since last service call
     bytes_in_since_service_ = 0;

@@ -173,6 +173,8 @@ target_link_libraries(luxon_visualizer PRIVATE
 )
 
 if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    include(CTest)
+
     # Executables
     add_executable(luxon_parser
         apps/luxon_parser.cpp
@@ -187,6 +189,14 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     target_link_libraries(luxon_ser_test
         luxon_ser luxon_visualizer
     )
+
+    if (BUILD_TESTING)
+        add_executable(enet_reliable_window_test
+            apps/enet_reliable_window_test.cpp
+        )
+        target_link_libraries(enet_reliable_window_test PRIVATE luxon_enet)
+        add_test(NAME enet_reliable_window_test COMMAND enet_reliable_window_test)
+    endif()
 
     #add_executable(luxon_test_client
     #    apps/luxon_test_client.cpp

@@ -63,6 +63,12 @@ struct EnetPeerConfig {
     int time_ping_interval_ms = 1000;
     int disconnect_timeout_ms = 10000;
 
+    // Disconnect a peer whose reliable receive window keeps rejecting packets
+    // without making progress. The quiet interval prevents a single old drop
+    // from disconnecting a peer after traffic has stopped.
+    int incoming_reliable_stall_timeout_ms = 20000;
+    int incoming_reliable_stall_quiet_ms = 5000;
+
     uint8_t max_resends = 7; // Allows about 20 seconds of resends
     uint8_t fast_resend_count = 0;
     int max_pending_unreliable_commands = 0;
@@ -192,6 +198,11 @@ public:
     uint32_t outgoing_unreliable_seq = 0;
     uint32_t outgoing_reliable_unsequenced_seq = 0;
 
+    // A sequenced reliable window has been rejecting packets and has not
+    // accepted new reliable progress on this channel.
+    int reliable_window_stall_since_ms = -1;
+    int reliable_window_last_drop_ms = -1;
+
     // Reliable-unsequenced completion tracking
     uint32_t reliable_unsequenced_completely_received = 0;
     std::set<uint32_t> reliable_unsequenced_received;
@@ -277,6 +288,8 @@ public:
     std::function<void(LogLevel, std::string_view)> on_log_message;
 
 private:
+    friend struct EnetPeerTestAccess;
+
     void set_state(EnetConnectionState new_state);
 
     // Core protocol helpers
@@ -301,15 +314,15 @@ private:
     bool are_reliable_commands_in_transit() const;
 
     // Incoming command execution (ACK, connect, verifyconnect, disconnect, ping, payload, fragments...)
-    void execute_command(const EnetCommand& cmd);
+    bool execute_command(const EnetCommand& cmd);
 
-    bool queue_incoming_command(const EnetCommand& cmd);
+    bool queue_incoming_command(const EnetCommand& cmd, bool* out_of_window = nullptr);
 
     // Ack handling
     std::optional<EnetOutCommand> remove_sent_reliable(uint32_t ack_seq, uint8_t channel_id, bool is_unsequenced);
 
     // Fragment reassembly
-    void handle_fragment(const EnetCommand& fragment_cmd);
+    bool handle_fragment(const EnetCommand& fragment_cmd);
 
     // RTT updates
     void update_rtt(int last_rtt);
