@@ -1,6 +1,7 @@
 [submodule "Luxon"]
 	path = Luxon
-	url = https://gitlab.com/luxon_project/Luxon.git
+	url = https://github.com/Gixarde3/luxonserver.git
+	branch = fix/luxon-reliable-window-stall
 [submodule "vcpkg"]
 	path = vcpkg
 	url = https://github.com/microsoft/vcpkg
